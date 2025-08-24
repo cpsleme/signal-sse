@@ -80,25 +80,25 @@ type EventDataNats struct {
 // Structs for Outgoing Payloads (NATS to Signal)
 //----------------------------------------------------------------------------------------------------
 
-// ResponseNatsMessage represents the JSON payload received from the NATS 'outbound' topic.
-type ResponseNatsMessage struct {
-	Recipient  string `json:"recipient"`
-	Message    string `json:"message"`
-	Attachment string `json:"attachment,omitempty"`
-	Account    string `json:"account"`
+// responseNatsMessage represents the JSON payload received from the NATS 'outbound' topic.
+type responseNatsMessage struct {
+	Recipients  []string      `json:"recipients"`
+	Message     string        `json:"message"`
+	Attachments *[]Attachment `json:"attachments,omitempty"`
+	Account     string        `json:"account"`
 }
 
 // SignalResponseParams represents the nested 'params' structure in the JSON-RPC payload
 // that is sent to the signal-cli 'send' method.
 type SignalResponseParams struct {
-	Recipient  string `json:"recipient"`
-	Message    string `json:"message"`
-	Attachment string `json:"attachment,omitempty"`
-	Account    string `json:"account"`
+	Recipient   []string      `json:"recipient"`
+	Message     string        `json:"message"`
+	Attachments *[]Attachment `json:"attachments,omitempty"`
+	Account     string        `json:"account"`
 }
 
-// ResponseSignalMessage represents the full JSON-RPC payload to be sent to signal-cli's API.
-type ResponseSignalMessage struct {
+// responseSignalMessage represents the full JSON-RPC payload to be sent to signal-cli's API.
+type responseSignalMessage struct {
 	JSONRPC string               `json:"jsonrpc"`
 	Method  string               `json:"method"`
 	Params  SignalResponseParams `json:"params"`
@@ -110,39 +110,77 @@ type ResponseSignalMessage struct {
 //----------------------------------------------------------------------------------------------------
 
 var (
-	sseHost        = "localhost"
-	ssePort        = 8080
-	natsServer     = "nats://localhost:4222"
-	natsSubjectIn  = "signal.inbound"  // NATS topic for incoming Signal messages
-	natsSubjectOut = "signal.outbound" // NATS topic for outgoing Signal messages
-	sseURLReceive  = fmt.Sprintf("http://%s:%d/api/v1/events", sseHost, ssePort)
-	sseURLSend     = fmt.Sprintf("http://%s:%d/api/v1/rpc", sseHost, ssePort)
-	serverName     = fmt.Sprintf("%s:%d", sseHost, ssePort)
+	sseHost         = "localhost"
+	ssePort         = 8080
+	natsServer      = "nats://localhost:4222"
+	natsSubjectIn   = "signal.inbound"  // NATS topic for incoming Signal messages
+	natsSubjectOut  = "signal.outbound" // NATS topic for outgoing Signal messages
+	sseURLReceive   = fmt.Sprintf("http://%s:%d/api/v1/events", sseHost, ssePort)
+	sseURLSend      = fmt.Sprintf("http://%s:%d/api/v1/rpc", sseHost, ssePort)
+	serverName      = fmt.Sprintf("%s:%d", sseHost, ssePort)
+	jetStreamBucket = "signal-semaphore"
+	heartbeatKey    = "active"
 )
 
 //----------------------------------------------------------------------------------------------------
 // Main Service Functions
 //----------------------------------------------------------------------------------------------------
 
-// sendSignalMessage receives a byte slice from NATS, unmarshals it, and sends it to the
-// signal-cli's HTTP API as a JSON-RPC payload.
+// Get hostname once and store it in the global variable.
+func getHostname() string {
+	var err error
+	var hostName string
+
+	hostName, err = os.Hostname()
+	if err != nil {
+		log.Fatalf("Fatal Error: Could not get hostname. %v", err)
+	}
+	return hostName
+}
+
+// writeHeartbeatToJetStream writes the hostname to a JetStream key-value store every 5 seconds.
+func semaphoreSignalService(js nats.JetStreamContext) {
+	kv, err := js.KeyValue(jetStreamBucket)
+	if err != nil {
+		log.Printf("Key-Value bucket '%s' not found, creating it...", jetStreamBucket)
+		kv, err = js.CreateKeyValue(&nats.KeyValueConfig{
+			Bucket: jetStreamBucket,
+		})
+		if err != nil {
+			log.Fatalf("Fatal error creating JetStream Key-Value bucket: %v", err)
+		}
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	log.Printf("JetStream heartbeat started for bucket '%s' on key '%s'.", jetStreamBucket, heartbeatKey)
+
+	for range ticker.C {
+		if _, err := kv.PutString(heartbeatKey, getHostname()); err != nil {
+			log.Printf("Error writing heartbeat to JetStream: %v", err)
+		} else {
+			log.Printf("Heartbeat written to JetStream: key='%s', value='%s'", heartbeatKey, getHostname())
+		}
+	}
+}
+
+// sendSignalMessage is responsible for sending a message to signal-cli's HTTP API.
 func sendSignalMessage(data []byte) {
-	var natsMessage ResponseNatsMessage
+	var natsMessage responseNatsMessage
 	if err := json.Unmarshal(data, &natsMessage); err != nil {
 		log.Printf("Error decoding JSON message from NATS: %v", err)
 		return
 	}
 
-	// Prepare the nested 'params' structure from the NATS payload.
 	params := SignalResponseParams{
-		Recipient:  natsMessage.Recipient,
-		Message:    natsMessage.Message,
-		Attachment: natsMessage.Attachment,
-		Account:    natsMessage.Account,
+		Recipient:   natsMessage.Recipients,
+		Message:     natsMessage.Message,
+		Attachments: natsMessage.Attachments,
+		Account:     natsMessage.Account,
 	}
 
-	// Construct the full JSON-RPC payload to be sent to signal-cli.
-	signalMessage := ResponseSignalMessage{
+	signalMessage := responseSignalMessage{
 		JSONRPC: "2.0",
 		Method:  "send",
 		Params:  params,
@@ -155,8 +193,8 @@ func sendSignalMessage(data []byte) {
 		return
 	}
 
-	// Send the message to signal-cli via an HTTP POST request.
-	req, err := http.NewRequest("POST", sseURLSend, bytes.NewBuffer(payloadBytes))
+	url := fmt.Sprintf("%s", sseURLSend)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		log.Printf("Error creating HTTP request: %v", err)
 		return
@@ -174,24 +212,34 @@ func sendSignalMessage(data []byte) {
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Failed to send message from account '%s'. Status code: %d", natsMessage.Account, resp.StatusCode)
 	} else {
-		log.Printf("Message sent successfully from account '%s' to recipients %v.", natsMessage.Account, natsMessage.Recipient)
+		log.Printf("Message sent successfully from account '%s' to recipients %v.", natsMessage.Account, natsMessage.Recipients)
 	}
 }
 
 // sendSignalMessageService is a long-running goroutine that subscribes to a NATS topic
-// and processes outgoing messages to be sent to Signal.
-func sendSignalMessageService() {
-	nc, err := nats.Connect(natsServer)
-	if err != nil {
-		log.Fatalf("Error connecting to NATS: %v", err)
-	}
-	defer nc.Close()
-
+// and processes outgoing messages to be sent to Signal only if it's the active instance.
+func sendSignalMessageService(nc *nats.Conn, js nats.JetStreamContext) {
 	log.Printf("Connected to NATS at: %s", natsServer)
 
+	kv, err := js.KeyValue(jetStreamBucket)
+	if err != nil {
+		log.Fatalf("Fatal error getting Key-Value bucket for send service: %v", err)
+	}
+
 	_, err = nc.Subscribe(natsSubjectOut, func(msg *nats.Msg) {
-		log.Printf("Message received on topic '%s': %s", msg.Subject, string(msg.Data))
-		// For each message, process it in a separate goroutine.
+
+		activeHost, err := kv.Get(heartbeatKey)
+		if err != nil {
+			log.Printf("Error getting active hostname from JetStream: %v", err)
+			return
+		}
+
+		if string(activeHost.Value()) != getHostname() {
+			log.Printf("Passive instance. Skipping message from topic '%s'. Active host is '%s'.", msg.Subject, activeHost)
+			return
+		}
+
+		log.Printf("Active instance. Processing message from topic '%s': %s", msg.Subject, string(msg.Data))
 		go sendSignalMessage(msg.Data)
 	})
 	if err != nil {
@@ -203,36 +251,25 @@ func sendSignalMessageService() {
 }
 
 // receiveSignalMessageService is a long-running goroutine that connects to the signal-cli's
-// SSE stream and publishes received messages to a NATS topic.
-func receiveSignalMessageService() {
-	// Get the local hostname for logging and message identification.
-	hostName, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("Error getting hostname: %v", err)
-	}
-
-	// Log service configurations at startup.
+// SSE stream and publishes received messages to a NATS topic only if it's the active instance.
+func receiveSignalMessageService(nc *nats.Conn, js nats.JetStreamContext) {
 	log.Printf("Receive with configurations applied:")
 	log.Printf("  SSE URL: %s", sseURLReceive)
 	log.Printf("  NATS Server: %s", natsServer)
 	log.Printf("  NATS Subject: %s", natsSubjectIn)
 	log.Printf("  Server Name: %s", serverName)
-	log.Printf("  Local hostname: %s", hostName)
+	log.Printf("  Local hostname: %s", getHostname())
 
-	// Initialize NATS client and establish a connection.
-	nc, err := nats.Connect(natsServer)
+	kv, err := js.KeyValue(jetStreamBucket)
 	if err != nil {
-		log.Fatalf("Error connecting to NATS: %v", err)
+		log.Fatalf("Fatal error getting Key-Value bucket for receive service: %v", err)
 	}
-	defer nc.Close()
 
-	// Initialize HTTP client and make a GET request to the SSE endpoint.
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", sseURLReceive, nil)
 	if err != nil {
 		log.Fatalf("Error creating SSE request: %v", err)
 	}
-
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -242,15 +279,24 @@ func receiveSignalMessageService() {
 
 	log.Printf("Connected to SSE endpoint: %s", sseURLReceive)
 
-	// Read the SSE stream line by line.
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
+		activeHost, err := kv.Get(heartbeatKey)
+		if err != nil {
+			log.Printf("Error getting active hostname from JetStream: %v", err)
+			continue
+		}
+
+		if string(activeHost.Value()) != getHostname() {
+			log.Printf("Passive instance. Skipping message from SSE stream. Active host is '%s'.", activeHost)
+			continue
+		}
+
 		line := scanner.Text()
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
 		}
 
-		// Extract JSON data from the "data:" prefix.
 		dataStr := strings.TrimPrefix(line, "data:")
 
 		var eventData EventData
@@ -259,7 +305,6 @@ func receiveSignalMessageService() {
 			continue
 		}
 
-		// Log key message details for easy tracking.
 		account := eventData.Account
 		sourceNumber := eventData.Envelope.SourceNumber
 		sourceName := eventData.Envelope.SourceName
@@ -277,10 +322,9 @@ func receiveSignalMessageService() {
 		log.Printf("  Content: %s", messageContent)
 		log.Printf("  TimestampSignal: %d", timestamp)
 
-		// Create the NATS payload with a unique ID and server timestamp.
 		eventDataNats := EventDataNats{
 			ID:              uuid.NewString(),
-			Server:          hostName,
+			Server:          getHostname(),
 			TimestampServer: time.Now().UnixMilli(),
 			Message:         &eventData,
 		}
@@ -290,7 +334,6 @@ func receiveSignalMessageService() {
 			continue
 		}
 
-		// Publish the new payload to the NATS inbound topic.
 		if err := nc.Publish(natsSubjectIn, eventDataNatsJSON); err != nil {
 			log.Printf("Error publishing message to NATS: %v", err)
 		} else {
@@ -304,12 +347,30 @@ func receiveSignalMessageService() {
 }
 
 func main() {
-	// Start the message receiving service in a goroutine.
-	go receiveSignalMessageService()
+	var err error
 
-	// Start the message sending service in a goroutine.
-	go sendSignalMessageService()
+	// Centralized NATS connection
+	nc, err := nats.Connect(natsServer)
+	if err != nil {
+		log.Fatalf("Fatal Error: Could not connect to NATS. %v", err)
+	}
+	defer nc.Close()
 
-	// Keep the main goroutine running indefinitely.
+	// Centralized JetStream context
+	js, err := nc.JetStream()
+	if err != nil {
+		log.Fatalf("Fatal Error: Could not create JetStream context. %v", err)
+	}
+
+	// Init semaphore service
+	go semaphoreSignalService(js)
+	time.Sleep(3 * time.Second)
+
+	// Init receiving messages
+	go receiveSignalMessageService(nc, js)
+
+	// Init sending messages
+	go sendSignalMessageService(nc, js)
+
 	select {}
 }
