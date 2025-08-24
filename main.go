@@ -67,7 +67,7 @@ type EventDataNats struct {
 	ID              string     `json:"id"`
 	Server          string     `json:"server"`
 	TimestampServer int64      `json:"timestamp"`
-	EventData       *EventData `json:"eventData"`
+	Message         *EventData `json:"eventData"`
 }
 
 // Configurable variables
@@ -80,8 +80,8 @@ var (
 	serverName  = fmt.Sprintf("%s:%d", sseHost, ssePort)
 )
 
-func main() {
-
+// receiveSignalMessages contains the main logic for processing SSE events and publishing to NATS
+func receiveSignalMessages() {
 	// Get the local hostname
 	hostName, err := os.Hostname()
 	if err != nil {
@@ -160,7 +160,7 @@ func main() {
 			ID:              uuid.NewString(),
 			Server:          hostName,
 			TimestampServer: time.Now().UnixMilli(),
-			EventData:       &eventData,
+			Message:         &eventData,
 		}
 		eventDataNatsJSON, err := json.Marshal(eventDataNats)
 		if err != nil {
@@ -179,4 +179,12 @@ func main() {
 	if err := scanner.Err(); err != nil {
 		log.Fatalf("Error reading SSE stream: %v", err)
 	}
+}
+
+func main() {
+	// Start the event processing in a goroutine
+	go receiveSignalMessages()
+
+	// Keep the main goroutine running
+	select {}
 }
