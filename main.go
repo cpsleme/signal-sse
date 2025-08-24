@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,7 +15,11 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// Attachment represents the structure for message attachments
+//----------------------------------------------------------------------------------------------------
+// Structs for Incoming Payloads (Signal to NATS)
+//----------------------------------------------------------------------------------------------------
+
+// Attachment represents the structure for message attachments from Signal.
 type Attachment struct {
 	ContentType     string  `json:"contentType"`
 	Filename        *string `json:"filename"`
@@ -26,7 +31,7 @@ type Attachment struct {
 	UploadTimestamp int     `json:"uploadTimestamp"`
 }
 
-// SentMessage represents the sent message structure
+// SentMessage represents the sent message structure within a SyncMessage.
 type SentMessage struct {
 	Destination       string        `json:"destination"`
 	DestinationNumber string        `json:"destinationNumber"`
@@ -38,12 +43,12 @@ type SentMessage struct {
 	Attachments       *[]Attachment `json:"attachments"`
 }
 
-// SyncMessage represents the sync message structure
+// SyncMessage represents the sync message structure received from Signal.
 type SyncMessage struct {
 	SentMessage *SentMessage `json:"sentMessage"`
 }
 
-// Envelope represents the envelope structure
+// Envelope represents the core message envelope containing sender and message details.
 type Envelope struct {
 	Source                   string      `json:"source"`
 	SourceNumber             string      `json:"sourceNumber"`
@@ -56,13 +61,14 @@ type Envelope struct {
 	SyncMessage              SyncMessage `json:"syncMessage"`
 }
 
-// EventData represents the top-level event data structure
+// EventData represents the top-level event data received from the Signal SSE stream.
 type EventData struct {
 	Envelope Envelope `json:"envelope"`
 	Account  string   `json:"account"`
 }
 
-// EventDataNats represents the NATS payload structure
+// EventDataNats represents the payload structure for messages published to the NATS 'inbound' topic.
+// It wraps the raw Signal event data with a unique ID and server-side timestamp.
 type EventDataNats struct {
 	ID              string     `json:"id"`
 	Server          string     `json:"server"`
@@ -70,47 +76,163 @@ type EventDataNats struct {
 	Message         *EventData `json:"eventData"`
 }
 
-// Configurable variables
+//----------------------------------------------------------------------------------------------------
+// Structs for Outgoing Payloads (NATS to Signal)
+//----------------------------------------------------------------------------------------------------
+
+// ResponseNatsMessage represents the JSON payload received from the NATS 'outbound' topic.
+type ResponseNatsMessage struct {
+	Recipient  string `json:"recipient"`
+	Message    string `json:"message"`
+	Attachment string `json:"attachment,omitempty"`
+	Account    string `json:"account"`
+}
+
+// SignalResponseParams represents the nested 'params' structure in the JSON-RPC payload
+// that is sent to the signal-cli 'send' method.
+type SignalResponseParams struct {
+	Recipient  string `json:"recipient"`
+	Message    string `json:"message"`
+	Attachment string `json:"attachment,omitempty"`
+	Account    string `json:"account"`
+}
+
+// ResponseSignalMessage represents the full JSON-RPC payload to be sent to signal-cli's API.
+type ResponseSignalMessage struct {
+	JSONRPC string               `json:"jsonrpc"`
+	Method  string               `json:"method"`
+	Params  SignalResponseParams `json:"params"`
+	ID      int                  `json:"id"`
+}
+
+//----------------------------------------------------------------------------------------------------
+// Service Configuration
+//----------------------------------------------------------------------------------------------------
+
 var (
-	sseHost     = "localhost"
-	ssePort     = 8080
-	natsServer  = "nats://localhost:4222"
-	natsSubject = "signal.inbound"
-	sseURL      = fmt.Sprintf("http://%s:%d/api/v1/events", sseHost, ssePort)
-	serverName  = fmt.Sprintf("%s:%d", sseHost, ssePort)
+	sseHost        = "localhost"
+	ssePort        = 8080
+	natsServer     = "nats://localhost:4222"
+	natsSubjectIn  = "signal.inbound"  // NATS topic for incoming Signal messages
+	natsSubjectOut = "signal.outbound" // NATS topic for outgoing Signal messages
+	sseURLReceive  = fmt.Sprintf("http://%s:%d/api/v1/events", sseHost, ssePort)
+	sseURLSend     = fmt.Sprintf("http://%s:%d/api/v1/rpc", sseHost, ssePort)
+	serverName     = fmt.Sprintf("%s:%d", sseHost, ssePort)
 )
 
-// receiveSignalMessages contains the main logic for processing SSE events and publishing to NATS
-func receiveSignalMessages() {
-	// Get the local hostname
-	hostName, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("Error getting hostname: %v", err)
+//----------------------------------------------------------------------------------------------------
+// Main Service Functions
+//----------------------------------------------------------------------------------------------------
+
+// sendSignalMessage receives a byte slice from NATS, unmarshals it, and sends it to the
+// signal-cli's HTTP API as a JSON-RPC payload.
+func sendSignalMessage(data []byte) {
+	var natsMessage ResponseNatsMessage
+	if err := json.Unmarshal(data, &natsMessage); err != nil {
+		log.Printf("Error decoding JSON message from NATS: %v", err)
+		return
 	}
 
-	// Log configurations
-	log.Printf("Configurations applied:")
-	log.Printf("  SSE URL: %s", sseURL)
-	log.Printf("  NATS Server: %s", natsServer)
-	log.Printf("  NATS Subject: %s", natsSubject)
-	log.Printf("  Server Name: %s", serverName)
-	log.Printf("  Local hostname: %s", hostName)
+	// Prepare the nested 'params' structure from the NATS payload.
+	params := SignalResponseParams{
+		Recipient:  natsMessage.Recipient,
+		Message:    natsMessage.Message,
+		Attachment: natsMessage.Attachment,
+		Account:    natsMessage.Account,
+	}
 
-	// Initialize NATS client
+	// Construct the full JSON-RPC payload to be sent to signal-cli.
+	signalMessage := ResponseSignalMessage{
+		JSONRPC: "2.0",
+		Method:  "send",
+		Params:  params,
+		ID:      1,
+	}
+
+	payloadBytes, err := json.Marshal(signalMessage)
+	if err != nil {
+		log.Printf("Error serializing payload for signal-cli: %v", err)
+		return
+	}
+
+	// Send the message to signal-cli via an HTTP POST request.
+	req, err := http.NewRequest("POST", sseURLSend, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		log.Printf("Error creating HTTP request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Error sending message to signal-cli: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Failed to send message from account '%s'. Status code: %d", natsMessage.Account, resp.StatusCode)
+	} else {
+		log.Printf("Message sent successfully from account '%s' to recipients %v.", natsMessage.Account, natsMessage.Recipient)
+	}
+}
+
+// sendSignalMessageService is a long-running goroutine that subscribes to a NATS topic
+// and processes outgoing messages to be sent to Signal.
+func sendSignalMessageService() {
 	nc, err := nats.Connect(natsServer)
 	if err != nil {
 		log.Fatalf("Error connecting to NATS: %v", err)
 	}
 	defer nc.Close()
 
-	// Initialize HTTP client for SSE
+	log.Printf("Connected to NATS at: %s", natsServer)
+
+	_, err = nc.Subscribe(natsSubjectOut, func(msg *nats.Msg) {
+		log.Printf("Message received on topic '%s': %s", msg.Subject, string(msg.Data))
+		// For each message, process it in a separate goroutine.
+		go sendSignalMessage(msg.Data)
+	})
+	if err != nil {
+		log.Fatalf("Error subscribing to topic '%s': %v", natsSubjectOut, err)
+	}
+
+	log.Printf("Successfully subscribed to topic '%s'. Waiting for messages...", natsSubjectOut)
+	select {}
+}
+
+// receiveSignalMessageService is a long-running goroutine that connects to the signal-cli's
+// SSE stream and publishes received messages to a NATS topic.
+func receiveSignalMessageService() {
+	// Get the local hostname for logging and message identification.
+	hostName, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("Error getting hostname: %v", err)
+	}
+
+	// Log service configurations at startup.
+	log.Printf("Receive with configurations applied:")
+	log.Printf("  SSE URL: %s", sseURLReceive)
+	log.Printf("  NATS Server: %s", natsServer)
+	log.Printf("  NATS Subject: %s", natsSubjectIn)
+	log.Printf("  Server Name: %s", serverName)
+	log.Printf("  Local hostname: %s", hostName)
+
+	// Initialize NATS client and establish a connection.
+	nc, err := nats.Connect(natsServer)
+	if err != nil {
+		log.Fatalf("Error connecting to NATS: %v", err)
+	}
+	defer nc.Close()
+
+	// Initialize HTTP client and make a GET request to the SSE endpoint.
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", sseURL, nil)
+	req, err := http.NewRequest("GET", sseURLReceive, nil)
 	if err != nil {
 		log.Fatalf("Error creating SSE request: %v", err)
 	}
 
-	// Set headers for SSE
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -118,9 +240,9 @@ func receiveSignalMessages() {
 	}
 	defer resp.Body.Close()
 
-	log.Printf("Connected to SSE endpoint: %s", sseURL)
+	log.Printf("Connected to SSE endpoint: %s", sseURLReceive)
 
-	// Read SSE stream
+	// Read the SSE stream line by line.
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -128,7 +250,7 @@ func receiveSignalMessages() {
 			continue
 		}
 
-		// Extract JSON data from SSE event
+		// Extract JSON data from the "data:" prefix.
 		dataStr := strings.TrimPrefix(line, "data:")
 
 		var eventData EventData
@@ -137,7 +259,7 @@ func receiveSignalMessages() {
 			continue
 		}
 
-		// Extract fields for logging with nil checks
+		// Log key message details for easy tracking.
 		account := eventData.Account
 		sourceNumber := eventData.Envelope.SourceNumber
 		sourceName := eventData.Envelope.SourceName
@@ -155,7 +277,7 @@ func receiveSignalMessages() {
 		log.Printf("  Content: %s", messageContent)
 		log.Printf("  TimestampSignal: %d", timestamp)
 
-		// Create EventDataNats payload with unique ID
+		// Create the NATS payload with a unique ID and server timestamp.
 		eventDataNats := EventDataNats{
 			ID:              uuid.NewString(),
 			Server:          hostName,
@@ -168,11 +290,11 @@ func receiveSignalMessages() {
 			continue
 		}
 
-		// Publish EventDataNats to NATS
-		if err := nc.Publish(natsSubject, eventDataNatsJSON); err != nil {
+		// Publish the new payload to the NATS inbound topic.
+		if err := nc.Publish(natsSubjectIn, eventDataNatsJSON); err != nil {
 			log.Printf("Error publishing message to NATS: %v", err)
 		} else {
-			log.Printf("Message published to NATS topic '%s': %s", natsSubject, string(eventDataNatsJSON))
+			log.Printf("Message published to NATS topic '%s': %s", natsSubjectIn, string(eventDataNatsJSON))
 		}
 	}
 
@@ -182,9 +304,12 @@ func receiveSignalMessages() {
 }
 
 func main() {
-	// Start the event processing in a goroutine
-	go receiveSignalMessages()
+	// Start the message receiving service in a goroutine.
+	go receiveSignalMessageService()
 
-	// Keep the main goroutine running
+	// Start the message sending service in a goroutine.
+	go sendSignalMessageService()
+
+	// Keep the main goroutine running indefinitely.
 	select {}
 }
