@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
 
@@ -59,6 +62,14 @@ type EventData struct {
 	Account  string   `json:"account"`
 }
 
+// EventDataNats represents the NATS payload structure
+type EventDataNats struct {
+	ID              string     `json:"id"`
+	Server          string     `json:"server"`
+	TimestampServer int64      `json:"timestamp"`
+	EventData       *EventData `json:"eventData"`
+}
+
 // Configurable variables
 var (
 	sseHost     = "localhost"
@@ -66,14 +77,24 @@ var (
 	natsServer  = "nats://localhost:4222"
 	natsSubject = "signal.inbound"
 	sseURL      = fmt.Sprintf("http://%s:%d/api/v1/events", sseHost, ssePort)
+	serverName  = fmt.Sprintf("%s:%d", sseHost, ssePort)
 )
 
 func main() {
+
+	// Get the local hostname
+	hostName, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("Error getting hostname: %v", err)
+	}
+
 	// Log configurations
 	log.Printf("Configurations applied:")
 	log.Printf("  SSE URL: %s", sseURL)
 	log.Printf("  NATS Server: %s", natsServer)
 	log.Printf("  NATS Subject: %s", natsSubject)
+	log.Printf("  Server Name: %s", serverName)
+	log.Printf("  Local hostname: %s", hostName)
 
 	// Initialize NATS client
 	nc, err := nats.Connect(natsServer)
@@ -132,13 +153,26 @@ func main() {
 		log.Printf("  Account: %s", account)
 		log.Printf("  From: %s (%s)", sourceNumber, sourceName)
 		log.Printf("  Content: %s", messageContent)
-		log.Printf("  Timestamp: %d", timestamp)
+		log.Printf("  TimestampSignal: %d", timestamp)
 
-		// Publish the entire EventData to NATS
-		if err := nc.Publish(natsSubject, []byte(dataStr)); err != nil {
+		// Create EventDataNats payload with unique ID
+		eventDataNats := EventDataNats{
+			ID:              uuid.NewString(),
+			Server:          hostName,
+			TimestampServer: time.Now().UnixMilli(),
+			EventData:       &eventData,
+		}
+		eventDataNatsJSON, err := json.Marshal(eventDataNats)
+		if err != nil {
+			log.Printf("Error serializing EventDataNats to JSON: %v", err)
+			continue
+		}
+
+		// Publish EventDataNats to NATS
+		if err := nc.Publish(natsSubject, eventDataNatsJSON); err != nil {
 			log.Printf("Error publishing message to NATS: %v", err)
 		} else {
-			log.Printf("Message published to NATS topic '%s': %s", natsSubject, dataStr)
+			log.Printf("Message published to NATS topic '%s': %s", natsSubject, string(eventDataNatsJSON))
 		}
 	}
 
