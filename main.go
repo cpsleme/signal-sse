@@ -81,28 +81,19 @@ type EventDataNats struct {
 //----------------------------------------------------------------------------------------------------
 
 // responseNatsMessage represents the JSON payload received from the NATS 'outbound' topic.
-type responseNatsMessage struct {
-	Recipients  []string      `json:"recipients"`
-	Message     string        `json:"message"`
-	Attachments *[]Attachment `json:"attachments,omitempty"`
-	Account     string        `json:"account"`
-}
-
-// SignalResponseParams represents the nested 'params' structure in the JSON-RPC payload
-// that is sent to the signal-cli 'send' method.
-type SignalResponseParams struct {
-	Recipient   []string      `json:"recipient"`
-	Message     string        `json:"message"`
-	Attachments *[]Attachment `json:"attachments,omitempty"`
-	Account     string        `json:"account"`
+type ResponseNatsMessage struct {
+	Recipient  string `json:"recipient"`
+	Message    string `json:"message"`
+	Attachment string `json:"attachment,omitempty"`
+	Account    string `json:"account"`
 }
 
 // responseSignalMessage represents the full JSON-RPC payload to be sent to signal-cli's API.
-type responseSignalMessage struct {
-	JSONRPC string               `json:"jsonrpc"`
-	Method  string               `json:"method"`
-	Params  SignalResponseParams `json:"params"`
-	ID      int                  `json:"id"`
+type ResponseSignalMessage struct {
+	JSONRPC string              `json:"jsonrpc"`
+	Method  string              `json:"method"`
+	Params  ResponseNatsMessage `json:"params"`
+	ID      int                 `json:"id"`
 }
 
 //----------------------------------------------------------------------------------------------------
@@ -167,23 +158,16 @@ func semaphoreSignalService(js nats.JetStreamContext) {
 
 // sendSignalMessage is responsible for sending a message to signal-cli's HTTP API.
 func sendSignalMessage(data []byte) {
-	var natsMessage responseNatsMessage
+	var natsMessage ResponseNatsMessage
 	if err := json.Unmarshal(data, &natsMessage); err != nil {
 		log.Printf("Error decoding JSON message from NATS: %v", err)
 		return
 	}
 
-	params := SignalResponseParams{
-		Recipient:   natsMessage.Recipients,
-		Message:     natsMessage.Message,
-		Attachments: natsMessage.Attachments,
-		Account:     natsMessage.Account,
-	}
-
-	signalMessage := responseSignalMessage{
+	signalMessage := ResponseSignalMessage{
 		JSONRPC: "2.0",
 		Method:  "send",
-		Params:  params,
+		Params:  natsMessage,
 		ID:      1,
 	}
 
@@ -212,7 +196,7 @@ func sendSignalMessage(data []byte) {
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Failed to send message from account '%s'. Status code: %d", natsMessage.Account, resp.StatusCode)
 	} else {
-		log.Printf("Message sent successfully from account '%s' to recipients %v.", natsMessage.Account, natsMessage.Recipients)
+		log.Printf("Message sent successfully from account '%s' to recipients %v.", natsMessage.Account, natsMessage.Recipient)
 	}
 }
 
