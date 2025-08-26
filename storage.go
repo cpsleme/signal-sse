@@ -1,0 +1,351 @@
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql" // MySQL driver
+	"github.com/google/uuid"
+)
+
+// HistoryRecord represents a single entry in the tb_history table,
+// designed to store details from both incoming and outgoing Signal messages.
+type HistoryRecord struct {
+	ID                string    // Unique ID for this history record
+	EventType         string    // "inbound" or "outbound"
+	OriginalMessageID string    // Original message ID from Signal/NATS
+	Account           string    // Signal account involved
+	SenderNumber      string    // Sender's phone number (for inbound)
+	SenderName        string    // Sender's name (for inbound)
+	Recipient         string    // Recipient's phone number (for outbound)
+	MessageContent    string    // The actual text message content
+	AttachmentsExist  bool      // True if attachments were present
+	TimestampService  int64     // When our service processed/logged it (Unix Millis)
+	TimestampSignal   int64     // Original timestamp from Signal (Unix Millis)
+	RawPayload        string    // Raw JSON payload of the original message
+	ProcessedByServer string    // The server that processed this message
+	LoggedAt          time.Time // When this record was inserted into history (UTC)
+}
+
+// AttachmentRecord represents a single entry in the tb_attachments table.
+type AttachmentRecord struct {
+	ID              string // Unique ID for this attachment record
+	HistoryID       string // Foreign key to tb_history
+	ContentType     string // e.g., "image/jpeg"
+	Filename        string // Original filename
+	Size            int    // Size in bytes
+	Width           int    // Image width (if applicable)
+	Height          int    // Image height (if applicable)
+	Caption         string // Caption for the attachment
+	UploadTimestamp int    // Original upload timestamp from Signal
+}
+
+// HistoryDB provides database operations for tb_history and tb_attachments.
+type HistoryDB struct {
+	db *sql.DB
+}
+
+// ConnectHistoryDB initializes and returns a new HistoryDB instance for MySQL.
+// It takes the MySQL DSN (Data Source Name) as input.
+func ConnectHistoryDB(mysqlDSN string) (*HistoryDB, error) { // Renamed function
+	db, err := sql.Open("mysql", mysqlDSN)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open MySQL database: %w", err)
+	}
+
+	// Set connection pool settings (optional, but recommended for production)
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	// Ping the database to ensure connection is established
+	if err = db.Ping(); err != nil {
+		db.Close() // Close if ping fails
+		return nil, fmt.Errorf("failed to connect to MySQL database: %w", err)
+	}
+
+	log.Printf("Successfully connected to MySQL database using DSN: %s", mysqlDSN)
+	return &HistoryDB{db: db}, nil
+}
+
+// Close closes the database connection.
+func (h *HistoryDB) Close() error {
+	return h.db.Close()
+}
+
+// CreateTables creates the tb_history and tb_attachments tables if they don't already exist.
+func (h *HistoryDB) CreateTables() error {
+	const createHistoryTableSQL = `
+	CREATE TABLE IF NOT EXISTS tb_history (
+		id VARCHAR(255) PRIMARY KEY,
+		event_type VARCHAR(50) NOT NULL,
+		original_message_id VARCHAR(255),
+		account VARCHAR(255) NOT NULL,
+		sender_number VARCHAR(255),
+		sender_name VARCHAR(255),
+		recipient VARCHAR(255),
+		message_content TEXT,
+		attachments_exist BOOLEAN,
+		timestamp_service BIGINT NOT NULL,
+		timestamp_signal BIGINT,
+		raw_payload JSON NOT NULL, -- Use JSON type for raw payload in MySQL 5.7+
+		processed_by_server VARCHAR(255) NOT NULL,
+		logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`
+
+	_, err := h.db.Exec(createHistoryTableSQL)
+	if err != nil {
+		return fmt.Errorf("failed to create tb_history table: %w", err)
+	}
+	log.Println("tb_history table ensured.")
+
+	const createAttachmentsTableSQL = `
+	CREATE TABLE IF NOT EXISTS tb_attachments (
+		id VARCHAR(255) PRIMARY KEY,
+		history_id VARCHAR(255) NOT NULL,
+		content_type VARCHAR(255),
+		filename VARCHAR(255),
+		size INT,
+		width INT,
+		height INT,
+		caption TEXT,
+		upload_timestamp BIGINT,
+		FOREIGN KEY (history_id) REFERENCES tb_history(id) ON DELETE CASCADE
+	);`
+
+	_, err = h.db.Exec(createAttachmentsTableSQL)
+	if err != nil {
+		return fmt.Errorf("failed to create tb_attachments table: %w", err)
+	}
+	log.Println("tb_attachments table ensured.")
+	return nil
+}
+
+// InsertInboundMessage inserts an incoming message payload into tb_history
+// and any associated attachments into tb_attachments.
+// It requires the server's hostname to log which server processed the message.
+func (h *HistoryDB) InsertInboundMessage(payload *InboundNatsMessagePayload, processedByServer string) error {
+	rawPayloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal inbound payload to JSON: %w", err)
+	}
+
+	historyID := payload.ID // Use the NATS payload ID as the history record ID - THIS IS WHAT YOU REQUESTED
+
+	var messageContent string
+	if payload.EventData != nil &&
+		payload.EventData.Envelope.SyncMessage.SentMessage != nil &&
+		payload.EventData.Envelope.SyncMessage.SentMessage.Message != nil {
+		messageContent = *payload.EventData.Envelope.SyncMessage.SentMessage.Message
+	} else {
+		messageContent = "<no message content>"
+	}
+
+	var attachmentsExist bool
+	var attachments []Attachment
+	if payload.EventData != nil &&
+		payload.EventData.Envelope.SyncMessage.SentMessage != nil &&
+		payload.EventData.Envelope.SyncMessage.SentMessage.Attachments != nil &&
+		len(*payload.EventData.Envelope.SyncMessage.SentMessage.Attachments) > 0 {
+		attachmentsExist = true
+		attachments = *payload.EventData.Envelope.SyncMessage.SentMessage.Attachments
+	}
+
+	record := HistoryRecord{
+		ID:                historyID,
+		EventType:         "inbound",
+		OriginalMessageID: fmt.Sprintf("%d", payload.EventData.Envelope.Timestamp), // Using Signal's timestamp as original ID
+		Account:           payload.EventData.Account,
+		SenderNumber:      payload.EventData.Envelope.SourceNumber,
+		SenderName:        payload.EventData.Envelope.SourceName,
+		MessageContent:    messageContent,
+		AttachmentsExist:  attachmentsExist,
+		TimestampService:  payload.TimestampServer,
+		TimestampSignal:   payload.EventData.Envelope.Timestamp,
+		RawPayload:        string(rawPayloadJSON),
+		ProcessedByServer: processedByServer,
+		LoggedAt:          time.Now().UTC(),
+	}
+
+	// Use a transaction for atomicity
+	tx, err := h.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for inbound message: %w", err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r)
+		} else if err != nil {
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+	}()
+
+	if err = h.insertHistoryRecord(tx, record); err != nil {
+		return fmt.Errorf("failed to insert inbound history record: %w", err)
+	}
+
+	for _, att := range attachments {
+		attachmentRecord := AttachmentRecord{
+			ID:              uuid.NewString(), // New UUID for each attachment
+			HistoryID:       historyID,
+			ContentType:     att.ContentType,
+			Filename:        valueOrDefault(att.Filename),
+			Size:            att.Size,
+			Width:           att.Width,
+			Height:          att.Height,
+			Caption:         valueOrDefault(att.Caption),
+			UploadTimestamp: att.UploadTimestamp,
+		}
+		if err = h.insertAttachmentRecord(tx, attachmentRecord); err != nil {
+			return fmt.Errorf("failed to insert inbound attachment record: %w", err)
+		}
+	}
+
+	log.Printf("Inbound message '%s' (%s) and %d attachments inserted successfully.", record.ID, record.EventType, len(attachments))
+	return err // Return the result of tx.Commit()
+}
+
+// InsertOutboundMessage inserts an outgoing message payload into tb_history
+// and any associated attachments into tb_attachments.
+// It requires the server's hostname to log which server processed the message.
+func (h *HistoryDB) InsertOutboundMessage(payload *SignalOutboundMessage, serviceTimestamp int64, processedByServer string) error {
+	rawPayloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal outbound payload to JSON: %w", err)
+	}
+
+	historyID := uuid.NewString() // Generate a new UUID for the history record
+
+	var attachmentsExist bool
+	if payload.Attachment != "" { // Simple check for attachment string
+		attachmentsExist = true
+	}
+
+	record := HistoryRecord{
+		ID:                historyID,
+		EventType:         "outbound",
+		OriginalMessageID: "N/A", // Outbound message might not have an original Signal ID yet
+		Account:           payload.Account,
+		Recipient:         payload.Recipient,
+		MessageContent:    payload.Message,
+		AttachmentsExist:  attachmentsExist,
+		TimestampService:  serviceTimestamp,
+		TimestampSignal:   0, // Not available for outbound before sending
+		RawPayload:        string(rawPayloadJSON),
+		ProcessedByServer: processedByServer,
+		LoggedAt:          time.Now().UTC(),
+	}
+
+	// Use a transaction for atomicity
+	tx, err := h.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for outbound message: %w", err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r)
+		} else if err != nil {
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+	}()
+
+	if err = h.insertHistoryRecord(tx, record); err != nil {
+		return fmt.Errorf("failed to insert outbound history record: %w", err)
+	}
+
+	if attachmentsExist {
+		// For outbound, we only have a string, so we'll store it as a single attachment record.
+		// In a real scenario, you might parse this string if it contains structured attachment data.
+		attachmentRecord := AttachmentRecord{
+			ID:              uuid.NewString(),
+			HistoryID:       historyID,
+			ContentType:     "unknown", // Or try to infer from payload.Attachment
+			Filename:        payload.Attachment,
+			Size:            0, // Not available from string
+			Width:           0,
+			Height:          0,
+			Caption:         "",
+			UploadTimestamp: int(serviceTimestamp / 1000), // Convert millis to seconds for consistency
+		}
+		if err = h.insertAttachmentRecord(tx, attachmentRecord); err != nil {
+			return fmt.Errorf("failed to insert outbound attachment record: %w", err)
+		}
+		log.Printf("Outbound message '%s' (%s) and 1 attachment inserted successfully.", record.ID, record.EventType)
+	} else {
+		log.Printf("Outbound message '%s' (%s) inserted successfully.", record.ID, record.EventType)
+	}
+
+	return err // Return the result of tx.Commit()
+}
+
+// insertHistoryRecord is a private helper to execute the SQL INSERT statement for tb_history within a transaction.
+func (h *HistoryDB) insertHistoryRecord(tx *sql.Tx, record HistoryRecord) error {
+	const insertSQL = `
+	INSERT INTO tb_history (
+		id, event_type, original_message_id, account, sender_number, sender_name,
+		recipient, message_content, attachments_exist, timestamp_service,
+		timestamp_signal, raw_payload, processed_by_server, logged_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+
+	_, err := tx.Exec(insertSQL,
+		record.ID,
+		record.EventType,
+		record.OriginalMessageID,
+		record.Account,
+		record.SenderNumber,
+		record.SenderName,
+		record.Recipient,
+		record.MessageContent,
+		record.AttachmentsExist,
+		record.TimestampService,
+		record.TimestampSignal,
+		record.RawPayload,
+		record.ProcessedByServer,
+		record.LoggedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert history record into tb_history: %w", err)
+	}
+	return nil
+}
+
+// insertAttachmentRecord is a private helper to execute the SQL INSERT statement for tb_attachments within a transaction.
+func (h *HistoryDB) insertAttachmentRecord(tx *sql.Tx, record AttachmentRecord) error {
+	const insertSQL = `
+	INSERT INTO tb_attachments (
+		id, history_id, content_type, filename, size, width, height, caption, upload_timestamp
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
+
+	_, err := tx.Exec(insertSQL,
+		record.ID,
+		record.HistoryID,
+		record.ContentType,
+		record.Filename,
+		record.Size,
+		record.Width,
+		record.Height,
+		record.Caption,
+		record.UploadTimestamp,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert attachment record into tb_attachments: %w", err)
+	}
+	return nil
+}
+
+// valueOrDefault helps handle *string pointers safely.
+func valueOrDefault(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
