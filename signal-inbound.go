@@ -20,7 +20,6 @@ func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config
 	log.Printf("  SSE URL: %s", cfg.SSEURLReceive)
 	log.Printf("  NATS Server: %s", cfg.NatsServer)
 	log.Printf("  NATS Subject: %s", cfg.NatsSubjectIn)
-	log.Printf("  Server Name: %s", cfg.ServerName)
 	log.Printf("  Local hostname: %s", getHostname())
 
 	client := &http.Client{Timeout: 30 * time.Second}                          // Add a timeout for the SSE client

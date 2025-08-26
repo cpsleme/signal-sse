@@ -15,7 +15,6 @@ type Config struct {
 	QueueGroup      string
 	SSEURLReceive   string
 	SSEURLSend      string
-	ServerName      string
 	StreamOut       string
 }
 

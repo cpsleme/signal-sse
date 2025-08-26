@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -64,7 +65,11 @@ func sendSignalMessage(cfg *Config, data []byte) error {
 // sendSignalMessageService is a long-running goroutine that subscribes to a NATS topic
 // and uses a worker pool to send messages to the Signal CLI API.
 func sendSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config) {
-	log.Printf("sendSignalMessageService: Connected to NATS at: %s", cfg.NatsServer)
+	log.Printf("sendSignalMessageService: Starting with configurations:")
+	log.Printf("  SSE URL: %s", cfg.SSEURLSend)
+	log.Printf("  NATS Server: %s", cfg.NatsServer)
+	log.Printf("  NATS Subject: %s", cfg.NatsSubjectOut)
+	log.Printf("  Local hostname: %s", getHostname())
 
 	js, err := nc.JetStream()
 	if err != nil {
@@ -87,8 +92,11 @@ func sendSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config) {
 	jobs := make(chan *nats.Msg, 100)           // Buffered channel for incoming NATS JetStream messages (jobs)
 	workerWg := make(chan struct{}, numWorkers) // Channel to limit concurrent workers
 
+	var wg sync.WaitGroup // Initialize a WaitGroup
+
 	// Start workers
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
+		wg.Add(1)
 		go func(workerID int) {
 			for {
 				select {
@@ -153,6 +161,6 @@ func sendSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config) {
 	}
 
 	close(jobs) // Close the job channel to signal workers to finish
-	// In a real-world scenario, you might want to wait for all workers to finish
-	// before completely exiting, possibly using a sync.WaitGroup.
+	wg.Wait()   // Wait for all workers to finish their current jobs and exit
+	log.Println("sendSignalMessageService: All workers finished processing remaining jobs.")
 }
