@@ -41,7 +41,7 @@ func main() {
 	// Start services as Goroutines, passing context and config
 	go receiveSignalMessageService(ctx, nc, cfg)
 	go sendSignalMessageService(ctx, nc, cfg)
-	go startStorage(ctx, nc, cfg)
+	//go startStorage(ctx, nc, cfg)
 
 	<-ctx.Done() // Wait for the context to be cancelled
 	log.Println("main: All services stopped. Exiting application.")

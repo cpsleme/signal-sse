@@ -22,7 +22,7 @@ type Config struct {
 // Configuration creates and validates the application configuration.
 func Configuration() *Config {
 	// Use the generic function with proper type-specific calls
-	signalSSEServer := getEnvAsString("SIGNAL_SSE_SERVER", "http://localhost:8080")
+	signalSSEServer := getEnvAsString("SIGNAL_SSE_SERVER", "localhost:8080")
 	natsServer := getEnvAsString("NATS_SERVER", "nats://localhost:4222")
 	streamOutName := getEnvAsString("NATS_STREAM_OUT", "SIGNAL_OUTBOUND_STREAM")
 	mysqlDSN := getEnvAsString("MYSQL_DSN", "user:password@tcp(127.0.0.1:3306)/database?parseTime=true")
@@ -34,10 +34,10 @@ func Configuration() *Config {
 	return &Config{
 		SignalSSEServer: signalSSEServer,
 		NatsServer:      natsServer,
-		NatsSubjectIn:   "signal.inbound",  // NATS topic for incoming Signal messages
-		NatsSubjectOut:  "signal.outbound", // NATS topic for outgoing Signal messages
-		QueueGroup:      "signal.outbound", // NATS Queue Group for outbound messages
-		StreamOut:       streamOutName,     // Dedicated JetStream stream for outbound
+		NatsSubjectIn:   "signal.inbound",        // NATS topic for incoming Signal messages
+		NatsSubjectOut:  "signal.outbound",       // NATS topic for outgoing Signal messages
+		QueueGroup:      "signal.outbound.group", // NATS Queue Group for outbound messages
+		StreamOut:       streamOutName,           // Dedicated JetStream stream for outbound
 		SSEURLReceive:   sseURLReceive,
 		SSEURLSend:      sseURLSend,
 		MySQLDSN:        mysqlDSN,
