@@ -28,3 +28,11 @@ func getHostname() string {
 	}
 	return hostname
 }
+
+// valueOrDefault helps handle *string pointers safely.
+func valueOrDefault(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}

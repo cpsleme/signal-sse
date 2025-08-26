@@ -16,6 +16,7 @@ type Config struct {
 	SSEURLReceive   string
 	SSEURLSend      string
 	StreamOut       string
+	MySQLDSN        string
 }
 
 // Configuration creates and validates the application configuration.
@@ -24,6 +25,7 @@ func Configuration() *Config {
 	signalSSEServer := getEnvAsString("SIGNAL_SSE_SERVER", "http://localhost:8080")
 	natsServer := getEnvAsString("NATS_SERVER", "nats://localhost:4222")
 	streamOutName := getEnvAsString("NATS_STREAM_OUT", "SIGNAL_OUTBOUND_STREAM")
+	mysqlDSN := getEnvAsString("MYSQL_DSN", "user:password@tcp(127.0.0.1:3306)/database?parseTime=true")
 
 	// Dependent variables
 	sseURLReceive := fmt.Sprintf("http://%s/api/v1/events", signalSSEServer)
@@ -38,5 +40,6 @@ func Configuration() *Config {
 		StreamOut:       streamOutName,     // Dedicated JetStream stream for outbound
 		SSEURLReceive:   sseURLReceive,
 		SSEURLSend:      sseURLSend,
+		MySQLDSN:        mysqlDSN,
 	}
 }

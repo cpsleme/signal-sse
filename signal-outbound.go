@@ -65,6 +65,9 @@ func sendSignalMessage(cfg *Config, data []byte) error {
 // sendSignalMessageService is a long-running goroutine that subscribes to a NATS topic
 // and uses a worker pool to send messages to the Signal CLI API.
 func sendSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config) {
+
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
 	log.Printf("sendSignalMessageService: Starting with configurations:")
 	log.Printf("  SSE URL: %s", cfg.SSEURLSend)
 	log.Printf("  NATS Server: %s", cfg.NatsServer)
