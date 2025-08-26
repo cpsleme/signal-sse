@@ -26,13 +26,3 @@ go.work.sum
 
 # env file
 .env
-
-# Editor/IDE
-# .idea/
-# .vscode/
-.idea/misc.xml
-.idea/modules.xml
-.idea/signal-sse.iml
-.idea/vcs.xml
-.idea/workspace.xml
-.idea/inspectionProfiles/Project_Default.xml
