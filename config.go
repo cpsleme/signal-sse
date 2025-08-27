@@ -25,7 +25,7 @@ func Configuration() *Config {
 	signalSSEServer := getEnvAsString("SIGNAL_SSE_SERVER", "localhost:8080")
 	natsServer := getEnvAsString("NATS_SERVER", "nats://localhost:4222")
 	streamOutName := getEnvAsString("NATS_STREAM_OUT", "SIGNAL_OUTBOUND_STREAM")
-	mysqlDSN := getEnvAsString("MYSQL_DSN", "user:password@tcp(127.0.0.1:3306)/database?parseTime=true")
+	mysqlDSN := getEnvAsString("MYSQL_DSN", "signal_user:password@tcp(localhost:3306)/signal_infinity_db?parseTime=true")
 
 	// Dependent variables
 	sseURLReceive := fmt.Sprintf("http://%s/api/v1/events", signalSSEServer)

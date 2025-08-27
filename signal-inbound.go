@@ -17,6 +17,8 @@ import (
 // SSE stream and publishes received messages to a NATS topic.
 func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config) {
 
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
 	log.Printf("Starting Signal SSE receiver on %s...", cfg.NatsSubjectIn)
 
 	client := &http.Client{}

@@ -65,7 +65,7 @@ func ConnectHistoryDB(mysqlDSN string) (*HistoryDB, error) {
 		return nil, fmt.Errorf("failed to connect to MySQL database: %w", err)
 	}
 
-	log.Printf("Successfully connected to MySQL database using DSN: %s", mysqlDSN)
+	log.Printf("Successfully connected to MySQL database using DSN.")
 	return &HistoryDB{db: db}, nil
 }
 
@@ -397,13 +397,9 @@ func startStorage(ctx context.Context, nc *nats.Conn, cfg *Config) {
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
-	log.Printf("startStorage: Starting with configurations:")
-	log.Printf("  NATS Server: %s", cfg.NatsServer)
-	log.Printf("  NATS Subject In: %s", cfg.NatsSubjectIn)
-	log.Printf("  NATS Subject Out: %s", cfg.NatsSubjectOut)
-	log.Printf("  Local hostname: %s", getHostname())
-
+	log.Printf("startStorage: Starting with configurations")
 	log.Printf("main: Attempting to connect to MySQL database...")
+
 	historyDB, err := ConnectHistoryDB(cfg.MySQLDSN)
 	if err != nil {
 		log.Fatalf("Fatal Error: main: Could not connect to history database: %v", err)
