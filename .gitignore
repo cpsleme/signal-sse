@@ -34,3 +34,4 @@ signal-sse
 .idea/workspace.xml
 .idea/inspectionProfiles/Project_Default.xml
 .vscode/launch.json
+config.yaml

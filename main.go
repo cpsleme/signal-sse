@@ -16,7 +16,10 @@ import (
 
 func main() {
 	// Initialize configuration
-	cfg := Configuration()
+	cfg, err := initConfig()
+	if err != nil {
+		log.Fatalf("Fatal Error: main: Could not get configuraion. %v", err)
+	}
 
 	// Set up graceful shutdown context
 	ctx, cancel := context.WithCancel(context.Background())
