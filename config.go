@@ -46,12 +46,7 @@ type Config struct {
 // initConfig reads the configuration file and loads it into the struct.
 func initConfig() (*Config, error) {
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatalf("Failed to get user home directory: %v", err)
-	}
-
-	configDirPath := filepath.Join(homeDir, ".signal-sse")
+	configDirPath := "/etc/signal-sse"
 
 	if err := os.MkdirAll(configDirPath, 0755); err != nil {
 		log.Fatalf("Failed to create config directory '%s': %v", configDirPath, err)
