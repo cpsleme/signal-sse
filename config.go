@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 
+	"path/filepath"
+
 	"github.com/spf13/viper"
 )
 
@@ -43,12 +45,23 @@ type Config struct {
 
 // initConfig reads the configuration file and loads it into the struct.
 func initConfig() (*Config, error) {
-	// Creates a sample configuration file if it doesn't exist.
-	// This is useful to ensure the program always has a file to read.
-	if _, err := os.Stat("config.yaml"); os.IsNotExist(err) {
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("Failed to get user home directory: %v", err)
+	}
+
+	configDirPath := filepath.Join(homeDir, ".signal-sse")
+
+	if err := os.MkdirAll(configDirPath, 0755); err != nil {
+		log.Fatalf("Failed to create config directory '%s': %v", configDirPath, err)
+	}
+
+	configFilePath := filepath.Join(configDirPath, "config.yaml")
+
+	if _, err := os.Stat(configFilePath); os.IsNotExist(err) {
 		log.Println("File 'config.yaml' not found. Creating a sample file.")
-		exampleConfig := `
-database:
+		exampleConfig := `database:
   host: "localhost"
   port: 3306
   user: "signal_user"
@@ -61,16 +74,16 @@ server-sse:
   host: "0.0.0.0"
   port: 8080
 `
-		if writeErr := os.WriteFile("config.yaml", []byte(exampleConfig), 0644); writeErr != nil {
+		if writeErr := os.WriteFile(configFilePath, []byte(exampleConfig), 0644); writeErr != nil {
 			return nil, fmt.Errorf("failed to create sample configuration file: %w", writeErr)
 		}
 	}
 
 	// 1. Configures Viper to look for a configuration file.
-	viper.SetConfigName("config")     // File name (without the extension)
-	viper.SetConfigType("yaml")       // File format (can be "json", "toml", etc.)
-	viper.AddConfigPath(".")          // Adds the current directory as a search path
-	viper.AddConfigPath("$HOME/.app") // Adds a secondary search path
+	viper.SetConfigName("config")      // File name (without the extension)
+	viper.SetConfigType("yaml")        // File format (can be "json", "toml", etc.)
+	viper.AddConfigPath(".")           // Adds the current directory as a search path
+	viper.AddConfigPath(configDirPath) // Adds a secondary search path
 
 	// 2. Tries to read the configuration file.
 	if err := viper.ReadInConfig(); err != nil {
