@@ -129,7 +129,7 @@ func (h *HistoryDB) createTables() error {
 	CREATE INDEX IF NOT EXISTS idx_history_sender_number ON tb_history (sender_number);
 	CREATE INDEX IF NOT EXISTS idx_history_recipient ON tb_history (recipient);
 	CREATE INDEX IF NOT EXISTS idx_history_timestamp_service ON tb_history (timestamp_service);
-	CREATE INDEX IF NOT EXISTS idx_history_attachments_id ON tb_history_attachments (id)
+	CREATE INDEX IF NOT EXISTS idx_history_attachments_id ON tb_history_attachments (id);
 	CREATE INDEX IF NOT EXISTS idx_history_attachments_history_id ON tb_history_attachments (history_id);
 	`
 
@@ -364,8 +364,8 @@ func startHistoryNatsSubscribers(ctx context.Context, nc *nats.Conn, cfg *Config
 
 	// Subscriber for inbound messages
 	// Subscribes to the standard NATS topic where `receiveSignalMessageService` (in another service) publishes.
-	// Using QueueSubscribe for scalability among multiple history logger instances.
-	inboundSub, err := nc.QueueSubscribe(cfg.NatsSubjectIn, "history-inbound-group", func(msg *nats.Msg) {
+	// Using Subscribe for scalability among multiple history logger instances.
+	inboundSub, err := nc.Subscribe(cfg.NatsSubjectIn, func(msg *nats.Msg) {
 		log.Printf("Received INBOUND NATS message for history on topic '%s'.", msg.Subject)
 		var inboundPayload InboundNatsMessagePayload
 		if err := json.Unmarshal(msg.Data, &inboundPayload); err != nil {
@@ -384,8 +384,8 @@ func startHistoryNatsSubscribers(ctx context.Context, nc *nats.Conn, cfg *Config
 
 	// Subscriber for outbound messages
 	// Subscribes to the standard NATS topic where outbound messages are published (e.g., before going to Signal CLI API).
-	// Using QueueSubscribe for scalability among multiple history logger instances.
-	outboundSub, err := nc.QueueSubscribe(cfg.NatsSubjectOut, "history-outbound-group", func(msg *nats.Msg) {
+	// Using Subscribe for scalability among multiple history logger instances.
+	outboundSub, err := nc.Subscribe(cfg.NatsSubjectOut, func(msg *nats.Msg) {
 		log.Printf("Received OUTBOUND NATS message for history on topic '%s'.", msg.Subject)
 		var outboundMessage SignalOutboundMessage
 		if err := json.Unmarshal(msg.Data, &outboundMessage); err != nil {
