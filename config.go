@@ -18,13 +18,6 @@ import (
 // The `mapstructure` tags are used by Viper to map the keys from
 // the configuration file to the fields of your struct.
 type Config struct {
-	Database struct {
-		Host     string `mapstructure:"host"`
-		Port     int    `mapstructure:"port"`
-		User     string `mapstructure:"user"`
-		Password string `mapstructure:"password"`
-		DBName   string `mapstructure:"dbname"`
-	} `mapstructure:"database"`
 	Nats struct {
 		Server string `mapstructure:"server"`
 		Port   int    `mapstructure:"port"`
@@ -61,13 +54,7 @@ func initConfig() (*Config, error) {
 
 	if _, err := os.Stat(configFilePath); os.IsNotExist(err) {
 		log.Println("File 'config.yaml' not found. Creating a sample file.")
-		exampleConfig := `database:
-  host: "localhost"
-  port: 3306
-  user: "signal_user"
-  password: "securepassword"
-  dbname: "signal_infinity_db"
-nats:
+		exampleConfig := `nats:
   server: "nats://localhost"
   port: 4222
 server-sse:
@@ -91,7 +78,7 @@ server-sse:
 			// File not found, but can continue with default values
 			log.Printf("Warning: Configuration file not found. Using defaults and/or environment variables.")
 		} else {
-			return nil, fmt.Errorf("error reading the configuration file: %w", err)
+			return nil, fmt.Errorf("Error reading the configuration file: %w", err)
 		}
 	}
 
@@ -115,23 +102,12 @@ server-sse:
 
 	natsServer := fmt.Sprintf("%s:%d", cfg.Nats.Server, cfg.Nats.Port)
 
-	// Construct the MySQL DSN
-	mysqlDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",
-		cfg.Database.User,
-		cfg.Database.Password,
-		cfg.Database.Host,
-		cfg.Database.Port,
-		cfg.Database.DBName,
-	)
-
 	// Final configuration struct with all values set
 	return &Config{
-		Database:       cfg.Database,
 		Nats:           cfg.Nats,
 		ServerSSE:      cfg.ServerSSE,
 		SSEURLReceive:  sseURLReceive,
 		SSEURLSend:     sseURLSend,
-		MySQLDSN:       mysqlDSN,
 		NatsServer:     natsServer,
 		NatsSubjectIn:  "signal.inbound",
 		NatsSubjectOut: "signal.outbound",
