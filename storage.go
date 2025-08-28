@@ -33,15 +33,16 @@ type HistoryRecord struct {
 
 // AttachmentRecord represents a single entry in the tb_attachments table.
 type HistoryAttachmentRecord struct {
-	ID              string // Unique ID for this attachment record
-	HistoryID       string // Foreign key to tb_history
-	ContentType     string // e.g., "image/jpeg"
-	Filename        string // Original filename
-	Size            int    // Size in bytes
-	Width           int    // Image width (if applicable)
-	Height          int    // Image height (if applicable)
-	Caption         string // Caption for the attachment
-	UploadTimestamp int    // Original upload timestamp from Signal
+	ID              string    // Unique ID for this attachment record
+	HistoryID       string    // Foreign key to tb_history
+	ContentType     string    // e.g., "image/jpeg"
+	Filename        string    // Original filename
+	Size            int       // Size in bytes
+	Width           int       // Image width (if applicable)
+	Height          int       // Image height (if applicable)
+	Caption         string    // Caption for the attachment
+	UploadTimestamp int       // Original upload timestamp from Signal
+	LoggedAt        time.Time // When this record was inserted into history (UTC)
 }
 
 // HistoryDB provides database operations for tb_history and tb_attachments.
@@ -70,13 +71,13 @@ func ConnectHistoryDB(mysqlDSN string) (*HistoryDB, error) {
 	return &HistoryDB{db: db}, nil
 }
 
-// Close closes the database connection.
+// Close the database connection.
 func (h *HistoryDB) Close() error {
 	return h.db.Close()
 }
 
 // CreateTables creates the tb_history and tb_attachments tables if they don't already exist.
-func (h *HistoryDB) CreateTables() error {
+func (h *HistoryDB) createTables() error {
 	const createHistoryTableSQL = `
 	CREATE TABLE IF NOT EXISTS tb_history (
 		id VARCHAR(255) PRIMARY KEY,
@@ -143,7 +144,7 @@ func (h *HistoryDB) CreateTables() error {
 // InsertInboundMessage inserts an incoming message payload into tb_history
 // and any associated attachments into tb_attachments.
 // It requires the server's hostname to log which server processed the message.
-func (h *HistoryDB) InsertInboundMessage(payload *InboundNatsMessagePayload, processedByServer string) error {
+func (h *HistoryDB) insertInboundMessage(payload *InboundNatsMessagePayload, processedByServer string) error {
 	rawPayloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal inbound payload to JSON: %w", err)
@@ -217,7 +218,7 @@ func (h *HistoryDB) InsertInboundMessage(payload *InboundNatsMessagePayload, pro
 			Caption:         valueOrDefault(att.Caption),
 			UploadTimestamp: att.UploadTimestamp,
 		}
-		if err = h.insertAttachmentRecord(tx, attachmentRecord); err != nil {
+		if err = h.insertHistoryAttachmentRecord(tx, attachmentRecord); err != nil {
 			return fmt.Errorf("failed to insert inbound attachment record: %w", err)
 		}
 	}
@@ -229,7 +230,7 @@ func (h *HistoryDB) InsertInboundMessage(payload *InboundNatsMessagePayload, pro
 // InsertOutboundMessage inserts an outgoing message payload into tb_history
 // and any associated attachments into tb_attachments.
 // It requires the server's hostname to log which server processed the message.
-func (h *HistoryDB) InsertOutboundMessage(payload *SignalOutboundMessage, serviceTimestamp int64, processedByServer string) error {
+func (h *HistoryDB) insertOutboundMessage(payload *SignalOutboundMessage, serviceTimestamp int64, processedByServer string) error {
 	rawPayloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal outbound payload to JSON: %w", err)
@@ -287,8 +288,9 @@ func (h *HistoryDB) InsertOutboundMessage(payload *SignalOutboundMessage, servic
 			Height:          0,
 			Caption:         "",
 			UploadTimestamp: int(serviceTimestamp / 1000),
+			LoggedAt:        time.Now().UTC(),
 		}
-		if err = h.insertAttachmentRecord(tx, attachmentRecord); err != nil {
+		if err = h.insertHistoryAttachmentRecord(tx, attachmentRecord); err != nil {
 			return fmt.Errorf("failed to insert outbound attachment record: %w", err)
 		}
 		log.Printf("Outbound message '%s' (%s) and 1 attachment inserted successfully.", record.ID, record.EventType)
@@ -330,12 +332,12 @@ func (h *HistoryDB) insertHistoryRecord(tx *sql.Tx, record HistoryRecord) error 
 	return nil
 }
 
-// insertAttachmentRecord is a private helper to execute the SQL INSERT statement for tb_attachments within a transaction.
-func (h *HistoryDB) insertAttachmentRecord(tx *sql.Tx, record HistoryAttachmentRecord) error {
+// insertHistoryAttachmentRecord is a private helper to execute the SQL INSERT statement for tb_attachments within a transaction.
+func (h *HistoryDB) insertHistoryAttachmentRecord(tx *sql.Tx, record HistoryAttachmentRecord) error {
 	const insertSQL = `
-	INSERT INTO tb_attachments (
-		id, history_id, content_type, filename, size, width, height, caption, upload_timestamp
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
+	INSERT INTO tb_history_attachments (
+		id, history_id, content_type, filename, size, width, height, caption, upload_timestamp, logged_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	_, err := tx.Exec(insertSQL,
 		record.ID,
@@ -347,6 +349,7 @@ func (h *HistoryDB) insertAttachmentRecord(tx *sql.Tx, record HistoryAttachmentR
 		record.Height,
 		record.Caption,
 		record.UploadTimestamp,
+		record.LoggedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert attachment record into tb_attachments: %w", err)
@@ -369,7 +372,7 @@ func startHistoryNatsSubscribers(ctx context.Context, nc *nats.Conn, cfg *Config
 			return
 		}
 
-		if err := historyDB.InsertInboundMessage(&inboundPayload, getHostname()); err != nil {
+		if err := historyDB.insertInboundMessage(&inboundPayload, getHostname()); err != nil {
 			log.Printf("Error logging INBOUND message to history: %v", err)
 		}
 	})
@@ -391,7 +394,7 @@ func startHistoryNatsSubscribers(ctx context.Context, nc *nats.Conn, cfg *Config
 
 		// The service timestamp for the outbound message is generated here, at the time of logging.
 		serviceTimestamp := time.Now().UnixMilli()
-		if err := historyDB.InsertOutboundMessage(&outboundMessage, serviceTimestamp, getHostname()); err != nil {
+		if err := historyDB.insertOutboundMessage(&outboundMessage, serviceTimestamp, getHostname()); err != nil {
 			log.Printf("Error logging OUTBOUND message to history: %v", err)
 		}
 	})
@@ -411,6 +414,7 @@ func startHistoryNatsSubscribers(ctx context.Context, nc *nats.Conn, cfg *Config
 	}
 }
 
+// Entry point
 func startStorage(ctx context.Context, nc *nats.Conn, cfg *Config) {
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
@@ -427,7 +431,7 @@ func startStorage(ctx context.Context, nc *nats.Conn, cfg *Config) {
 		}
 	}()
 
-	if err := historyDB.CreateTables(); err != nil {
+	if err := historyDB.createTables(); err != nil {
 		log.Fatalf("Could not create history tables: %v", err)
 	}
 
