@@ -125,7 +125,7 @@ func (h *HistoryDB) createTables() error {
 
 	// Create Indexes
 	const createIndexesSQL = `
-	CREATE INDEX IF NOT EXISTS idx_history_id ON tb_history (id)
+	CREATE INDEX IF NOT EXISTS idx_history_id ON tb_history (id);
 	CREATE INDEX IF NOT EXISTS idx_history_sender_number ON tb_history (sender_number);
 	CREATE INDEX IF NOT EXISTS idx_history_recipient ON tb_history (recipient);
 	CREATE INDEX IF NOT EXISTS idx_history_timestamp_service ON tb_history (timestamp_service);
