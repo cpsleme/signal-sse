@@ -5,6 +5,7 @@ go 1.24.6
 require github.com/nats-io/nats.go v1.45.0
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
@@ -21,6 +22,7 @@ require (
 )
 
 require (
+	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/nats-io/nkeys v0.4.11 // indirect

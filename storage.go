@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql" // Import the MySQL driver
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
