@@ -65,8 +65,8 @@ func initConfig() (*Config, error) {
   host: "localhost"
   port: 3306
   user: "signal_user"
-  password: "securepassword"
   dbname: "signal_infinity_db"
+  password: "securepassword"  
 nats:
   server: "nats://localhost"
   port: 4222

@@ -73,22 +73,22 @@ func sendSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config) {
 		cfg.NatsSubjectOut,
 		cfg.NatsQueueGroup,
 		func(msg *nats.Msg) {
-			log.Printf("sendSignalMessageService: Processing message from topic '%s'...", msg.Subject)
+			log.Printf("Processing message from topic '%s'...", msg.Subject)
 			// Process the message in a separate goroutine to avoid blocking the subscription loop.
 			go func() {
 				if err := sendSignalMessage(cfg, msg.Data); err != nil {
-					log.Printf("sendSignalMessageService: Failed to send message: %v.", err)
+					log.Printf("Failed to send message: %v.", err)
 				}
 			}()
 		},
 	)
 
 	if err != nil {
-		log.Fatalf("Fatal Error: sendSignalMessageService: Error subscribing to topic '%s': %v", cfg.NatsSubjectOut, err)
+		log.Fatalf("Error subscribing to topic '%s': %v", cfg.NatsSubjectOut, err)
 	}
 
-	log.Printf("sendSignalMessageService: Successfully subscribed to NATS topic '%s' in queue group '%s'. Waiting for messages...", cfg.NatsSubjectOut, cfg.NatsQueueGroup)
+	log.Printf("Successfully subscribed to NATS topic '%s' in queue group '%s'. Waiting for messages...", cfg.NatsSubjectOut, cfg.NatsQueueGroup)
 
 	<-ctx.Done() // Wait for context cancellation to signal shutdown
-	log.Println("sendSignalMessageService: Shutting down NATS Core subscription.")
+	log.Println("Shutting down NATS Core subscription.")
 }
