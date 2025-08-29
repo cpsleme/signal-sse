@@ -42,7 +42,7 @@ func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config
 		log.Fatalf("Could not create JetStream context. %v", err)
 	}
 
-	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "signal.bucket.inbound"})
+	kv, _ := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "signal_history_bkt"})
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
@@ -59,28 +59,27 @@ func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config
 
 		idMessage := fmt.Sprintf("%s-%v", eventData.Envelope.SourceUUID, eventData.Envelope.Timestamp)
 
-		_, err = kv.PutString(ctx, idMessage, eventData.Envelope.SourceNumber)
+		inboundPayload := InboundNatsMessagePayload{
+			ID:              idMessage,
+			Server:          getHostname(),
+			TimestampServer: time.Now().UnixMilli(),
+			EventData:       &eventData,
+		}
 
-		if err == nil {
+		payloadBytes, err := json.Marshal(inboundPayload)
+		if err != nil {
+			log.Printf("Error serializing NATS payload: %v", err)
+			continue
+		}
 
-			inboundPayload := InboundNatsMessagePayload{
-				ID:              idMessage,
-				Server:          getHostname(),
-				TimestampServer: time.Now().UnixMilli(),
-				EventData:       &eventData,
-			}
+		// Put into Jetstream Bucket
+		_, err = kv.Put(ctx, idMessage, payloadBytes)
 
-			payloadBytes, err := json.Marshal(inboundPayload)
-			if err != nil {
-				log.Printf("Error serializing NATS payload: %v", err)
-				continue
-			}
-
-			if err := nc.Publish(cfg.NatsSubjectIn, payloadBytes); err != nil {
-				log.Printf("Error publishing to NATS: %v", err)
-			} else {
-				log.Printf("Published message from '%s' to '%s'.", eventData.Envelope.SourceNumber, cfg.NatsSubjectIn)
-			}
+		// Publish to topic
+		if err := nc.Publish(cfg.NatsSubjectIn, payloadBytes); err != nil {
+			log.Printf("Error publishing to NATS: %v", err)
+		} else {
+			log.Printf("Published message from '%s' to '%s'.", eventData.Envelope.SourceNumber, cfg.NatsSubjectIn)
 		}
 
 	}
