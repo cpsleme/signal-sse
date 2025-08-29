@@ -19,7 +19,7 @@ CREATE USER 'signal_user'@'sig-srv-02.subnet.vcn.oraclevcn.com' IDENTIFIED BY 'p
 --
 -- O privilégio 'GRANT OPTION' permite que o usuário conceda privilégios a outros usuários.
 --
-GRANT CREATE, ALTER, INDEX, DROP, INSERT, UPDATE, DELETE, REFERENCES, SELECT ON signal_user.* TO 'signal_user'@'sig-srv-02.subnet.vcn.oraclevcn.com';
+GRANT CREATE, ALTER, INDEX, DROP, INSERT, UPDATE, DELETE, REFERENCES, SELECT ON signal_infinity_db.* TO 'signal_user'@'sig-srv-02.subnet.vcn.oraclevcn.com';
 
 USE signal_infinity_db;
 

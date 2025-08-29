@@ -300,6 +300,7 @@ func startHistoryNatsSubscribers(ctx context.Context, nc *nats.Conn, cfg *Config
 	// Subscribes to the standard NATS topic where `receiveSignalMessageService` (in another service) publishes.
 	// Using Subscribe for scalability among multiple history logger instances.
 	inboundSub, err := nc.Subscribe(cfg.NatsSubjectIn, func(msg *nats.Msg) {
+
 		log.Printf("Received INBOUND NATS message for history on topic '%s'.", msg.Subject)
 		var inboundPayload InboundNatsMessagePayload
 		if err := json.Unmarshal(msg.Data, &inboundPayload); err != nil {
@@ -307,9 +308,12 @@ func startHistoryNatsSubscribers(ctx context.Context, nc *nats.Conn, cfg *Config
 			return
 		}
 
-		if err := historyDB.insertInboundMessage(&inboundPayload, getHostname()); err != nil {
-			log.Printf("Error logging INBOUND message to history: %v", err)
+		if inboundPayload.Server == getHostname() {
+			if err := historyDB.insertInboundMessage(&inboundPayload, getHostname()); err != nil {
+				log.Printf("Error logging INBOUND message to history: %v", err)
+			}
 		}
+
 	})
 	if err != nil {
 		log.Fatalf("Failed to subscribe to topic '%s' for inbound history: %v", cfg.NatsSubjectIn, err)

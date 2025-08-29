@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // receiveSignalMessageService is a long-running goroutine that connects to the signal-cli's
@@ -36,6 +37,13 @@ func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config
 
 	log.Println("Connected to SSE stream.")
 
+	js, err := jetstream.New(nc)
+	if err != nil {
+		log.Fatalf("Could not create JetStream context. %v", err)
+	}
+
+	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "signal.bucket.inbound"})
+
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -49,24 +57,32 @@ func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config
 			continue
 		}
 
-		inboundPayload := InboundNatsMessagePayload{
-			ID:              uuid.NewString(),
-			Server:          getHostname(),
-			TimestampServer: time.Now().UnixMilli(),
-			EventData:       &eventData,
+		idMessage := fmt.Sprintf("%s-%v", eventData.Envelope.SourceUUID, eventData.Envelope.Timestamp)
+
+		_, err = kv.PutString(ctx, idMessage, eventData.Envelope.SourceNumber)
+
+		if err == nil {
+
+			inboundPayload := InboundNatsMessagePayload{
+				ID:              idMessage,
+				Server:          getHostname(),
+				TimestampServer: time.Now().UnixMilli(),
+				EventData:       &eventData,
+			}
+
+			payloadBytes, err := json.Marshal(inboundPayload)
+			if err != nil {
+				log.Printf("Error serializing NATS payload: %v", err)
+				continue
+			}
+
+			if err := nc.Publish(cfg.NatsSubjectIn, payloadBytes); err != nil {
+				log.Printf("Error publishing to NATS: %v", err)
+			} else {
+				log.Printf("Published message from '%s' to '%s'.", eventData.Envelope.SourceNumber, cfg.NatsSubjectIn)
+			}
 		}
 
-		payloadBytes, err := json.Marshal(inboundPayload)
-		if err != nil {
-			log.Printf("Error serializing NATS payload: %v", err)
-			continue
-		}
-
-		if err := nc.Publish(cfg.NatsSubjectIn, payloadBytes); err != nil {
-			log.Printf("Error publishing to NATS: %v", err)
-		} else {
-			log.Printf("Published message from '%s' to '%s'.", eventData.Envelope.SourceNumber, cfg.NatsSubjectIn)
-		}
 	}
 
 	if err := scanner.Err(); err != nil {
