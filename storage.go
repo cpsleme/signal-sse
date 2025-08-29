@@ -64,7 +64,7 @@ func ConnectHistoryDB(mysqlDSN string) (*HistoryDB, error) {
 
 	if err = db.Ping(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to connect to MySQL database: %w", err)
+		return nil, fmt.Errorf("failed to connect to MySQL database: %w using %s", err, mysqlDSN)
 	}
 
 	log.Printf("Successfully connected to MySQL database using DSN.")
@@ -74,72 +74,6 @@ func ConnectHistoryDB(mysqlDSN string) (*HistoryDB, error) {
 // Close the database connection.
 func (h *HistoryDB) Close() error {
 	return h.db.Close()
-}
-
-// CreateTables creates the tb_history and tb_attachments tables if they don't already exist.
-func (h *HistoryDB) createTables() error {
-	const createHistoryTableSQL = `
-	CREATE TABLE IF NOT EXISTS tb_history (
-		id VARCHAR(255) PRIMARY KEY,
-		event_type VARCHAR(50) NOT NULL,
-		original_message_id VARCHAR(255),
-		account VARCHAR(255) NOT NULL,
-		sender_number VARCHAR(255),
-		sender_name VARCHAR(255),
-		recipient VARCHAR(255),
-		message_content TEXT,
-		attachments_exist BOOLEAN,
-		timestamp_service BIGINT NOT NULL,
-		timestamp_signal BIGINT,
-		raw_payload JSON NOT NULL,
-		processed_by_server VARCHAR(255) NOT NULL,
-		logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);`
-
-	_, err := h.db.Exec(createHistoryTableSQL)
-	if err != nil {
-		return fmt.Errorf("failed to create tb_history table: %w", err)
-	}
-	log.Println("tb_history table ensured.")
-
-	const createHistoryAttachmentsTableSQL = `
-	CREATE TABLE IF NOT EXISTS tb_history_attachments (
-		id VARCHAR(255) PRIMARY KEY,
-		history_id VARCHAR(255) NOT NULL,
-		content_type VARCHAR(255),
-		filename VARCHAR(255),
-		size INT,
-		width INT,
-		height INT,
-		caption TEXT,
-		upload_timestamp BIGINT,
-		logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (history_id) REFERENCES tb_history(id) ON DELETE CASCADE
-	);`
-
-	_, err = h.db.Exec(createHistoryAttachmentsTableSQL)
-	if err != nil {
-		return fmt.Errorf("failed to create tb_history_attachments table: %w", err)
-	}
-	log.Println("tb_history_attachments table ensured.")
-
-	// Create Indexes
-	const createIndexesSQL = `
-	CREATE INDEX IF NOT EXISTS idx_history_id ON tb_history (id);
-	CREATE INDEX IF NOT EXISTS idx_history_sender_number ON tb_history (sender_number);
-	CREATE INDEX IF NOT EXISTS idx_history_recipient ON tb_history (recipient);
-	CREATE INDEX IF NOT EXISTS idx_history_timestamp_service ON tb_history (timestamp_service);
-	CREATE INDEX IF NOT EXISTS idx_history_attachments_id ON tb_history_attachments (id);
-	CREATE INDEX IF NOT EXISTS idx_history_attachments_history_id ON tb_history_attachments (history_id);
-	`
-
-	_, err = h.db.Exec(createIndexesSQL)
-	if err != nil {
-		return fmt.Errorf("failed to create indexes: %w", err)
-	}
-	log.Println("Database indexes ensured.")
-
-	return nil
 }
 
 // InsertInboundMessage inserts an incoming message payload into tb_history
@@ -185,7 +119,7 @@ func (h *HistoryDB) insertInboundMessage(payload *InboundNatsMessagePayload, pro
 		TimestampSignal:   payload.EventData.Envelope.Timestamp,
 		RawPayload:        string(rawPayloadJSON),
 		ProcessedByServer: processedByServer,
-		LoggedAt:          time.Now().UTC(),
+		LoggedAt:          time.Now(),
 	}
 
 	tx, err := h.db.Begin()
@@ -256,7 +190,7 @@ func (h *HistoryDB) insertOutboundMessage(payload *SignalOutboundMessage, servic
 		TimestampSignal:   0,
 		RawPayload:        string(rawPayloadJSON),
 		ProcessedByServer: processedByServer,
-		LoggedAt:          time.Now().UTC(),
+		LoggedAt:          time.Now(),
 	}
 
 	tx, err := h.db.Begin()
@@ -289,7 +223,7 @@ func (h *HistoryDB) insertOutboundMessage(payload *SignalOutboundMessage, servic
 			Height:          0,
 			Caption:         "",
 			UploadTimestamp: int(serviceTimestamp / 1000),
-			LoggedAt:        time.Now().UTC(),
+			LoggedAt:        time.Now(),
 		}
 		if err = h.insertHistoryAttachmentRecord(tx, attachmentRecord); err != nil {
 			return fmt.Errorf("failed to insert outbound attachment record: %w", err)
@@ -431,10 +365,6 @@ func startStorage(ctx context.Context, nc *nats.Conn, cfg *Config) {
 			log.Printf("Error closing history database: %v", closeErr)
 		}
 	}()
-
-	if err := historyDB.createTables(); err != nil {
-		log.Fatalf("Could not create history tables: %v", err)
-	}
 
 	// Start only the history subscribers. This function will block until ctx is cancelled.
 	startHistoryNatsSubscribers(ctx, nc, cfg, historyDB)

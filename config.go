@@ -74,30 +74,18 @@ server-sse:
 		}
 	}
 
-	// 1. Configures Viper to look for a configuration file.
 	viper.SetConfigName("config")      // File name (without the extension)
 	viper.SetConfigType("yaml")        // File format (can be "json", "toml", etc.)
-	viper.AddConfigPath(".")           // Adds the current directory as a search path
 	viper.AddConfigPath(configDirPath) // Adds a secondary search path
 
-	// 2. Tries to read the configuration file.
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// File not found, but can continue with default values
 			log.Printf("Warning: Configuration file not found. Using defaults and/or environment variables.")
 		} else {
 			return nil, fmt.Errorf("error reading the configuration file: %w", err)
 		}
 	}
 
-	// 3. Optional, but recommended: Bind environment variables.
-	// This allows environment variables to override values from the file.
-	// For example, an environment variable 'APP_DATABASE_USER' would
-	// override the 'user' field in the file.
-	viper.SetEnvPrefix("APP") // Prefix for environment variables (e.g., APP_DATABASE_USER)
-	viper.AutomaticEnv()      // Enables automatic reading of environment variables
-
-	// 4. Maps the read configuration to our struct.
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("could not map the configuration to the struct: %w", err)
