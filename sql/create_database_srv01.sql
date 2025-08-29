@@ -1,11 +1,11 @@
 -- Cria o banco de dados.
 -- O comando IF NOT EXISTS evita um erro caso o banco de dados já exista.
-CREATE DATABASE IF NOT EXISTS loa_db;
+CREATE DATABASE IF NOT EXISTS signal_infinity_db;
 
 -- Cria um novo usuário e define a senha.
 -- A cláusula 'localhost' garante que o usuário só possa se conectar do próprio servidor.
 -- Para permitir conexões de qualquer host, use '%' em vez de 'localhost'.
-CREATE USER 'loa_user'@'sig-srv-01.subnet04162109.vcn04162109.oraclevcn.com' IDENTIFIED BY 'password';
+CREATE USER 'signal_user'@'sig-srv-01.subnet04162109.vcn04162109.oraclevcn.com' IDENTIFIED BY 'password';
 
 -- Concede privilégios ao usuário para o banco de dados específico.
 -- A cláusula 'privilegios' indica quais permissões o usuário terá.
@@ -19,9 +19,9 @@ CREATE USER 'loa_user'@'sig-srv-01.subnet04162109.vcn04162109.oraclevcn.com' IDE
 --
 -- O privilégio 'GRANT OPTION' permite que o usuário conceda privilégios a outros usuários.
 --
-GRANT CREATE, ALTER, INDEX, DROP, INSERT, UPDATE, DELETE, REFERENCES, SELECT ON loa_db.* TO 'loa_user'@'sig-srv-01.subnet04162109.vcn04162109.oraclevcn.com';
+GRANT CREATE, ALTER, INDEX, DROP, INSERT, UPDATE, DELETE, REFERENCES, SELECT ON signal_user.* TO 'loa_user'@'sig-srv-01.subnet04162109.vcn04162109.oraclevcn.com';
 
-USE loa_db;
+USE signal_infinity_db;
 
 --DROP TABLE tb_history;
 -- Create the main history table
