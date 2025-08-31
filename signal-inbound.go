@@ -75,11 +75,15 @@ func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config
 		// Put into Jetstream Bucket
 		_, err = kv.Put(ctx, idMessage, payloadBytes)
 
+		if err != nil {
+			log.Printf("Error putting to Jetstream KV: %v", err)
+		}
+
 		// Publish to topic
 		if err := nc.Publish(cfg.NatsSubjectIn, payloadBytes); err != nil {
 			log.Printf("Error publishing to NATS: %v", err)
 		} else {
-			log.Printf("Published message from '%s' to '%s'.", eventData.Envelope.SourceNumber, cfg.NatsSubjectIn)
+			log.Printf("Published message '%s' from '%s' to '%s'.", idMessage, eventData.Envelope.SourceNumber, cfg.NatsSubjectIn)
 		}
 
 	}
