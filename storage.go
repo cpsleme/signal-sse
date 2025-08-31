@@ -17,7 +17,6 @@ import (
 type HistoryRecord struct {
 	ID                string    // Unique ID for this history record
 	EventType         string    // "inbound" or "outbound"
-	OriginalMessageID string    // Original message ID from Signal/NATS
 	Account           string    // Signal account involved
 	SenderNumber      string    // Sender's phone number (for inbound)
 	SenderName        string    // Sender's name (for inbound)
@@ -109,7 +108,6 @@ func (h *HistoryDB) insertInboundMessage(payload *InboundNatsMessagePayload, pro
 	record := HistoryRecord{
 		ID:                historyID,
 		EventType:         "inbound",
-		OriginalMessageID: fmt.Sprintf("%d", payload.EventData.Envelope.Timestamp),
 		Account:           payload.EventData.Account,
 		SenderNumber:      payload.EventData.Envelope.SourceNumber,
 		SenderName:        payload.EventData.Envelope.SourceName,
@@ -152,6 +150,7 @@ func (h *HistoryDB) insertInboundMessage(payload *InboundNatsMessagePayload, pro
 			Height:          att.Height,
 			Caption:         valueOrDefault(att.Caption),
 			UploadTimestamp: att.UploadTimestamp,
+			LoggedAt:        time.Now(),
 		}
 		if err = h.insertHistoryAttachmentRecord(tx, attachmentRecord); err != nil {
 			return fmt.Errorf("failed to insert inbound attachment record: %w", err)
@@ -181,7 +180,6 @@ func (h *HistoryDB) insertOutboundMessage(payload *SignalOutboundMessage, servic
 	record := HistoryRecord{
 		ID:                historyID,
 		EventType:         "outbound",
-		OriginalMessageID: "N/A",
 		Account:           payload.Account,
 		Recipient:         payload.Recipient,
 		MessageContent:    payload.Message,
@@ -240,15 +238,14 @@ func (h *HistoryDB) insertOutboundMessage(payload *SignalOutboundMessage, servic
 func (h *HistoryDB) insertHistoryRecord(tx *sql.Tx, record HistoryRecord) error {
 	const insertSQL = `
 	INSERT INTO tb_history (
-		id, event_type, original_message_id, account, sender_number, sender_name,
+		id, event_type, account, sender_number, sender_name,
 		recipient, message_content, attachments_exist, timestamp_service,
 		timestamp_signal, raw_payload, processed_by_server, logged_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	_, err := tx.Exec(insertSQL,
 		record.ID,
 		record.EventType,
-		record.OriginalMessageID,
 		record.Account,
 		record.SenderNumber,
 		record.SenderName,

@@ -28,7 +28,6 @@ USE signal_infinity_db;
 CREATE TABLE IF NOT EXISTS tb_history (
     id VARCHAR(255) PRIMARY KEY,
     event_type VARCHAR(50) NOT NULL,
-    original_message_id VARCHAR(255),
     account VARCHAR(255) NOT NULL,
     sender_number VARCHAR(255),
     sender_name VARCHAR(255),
