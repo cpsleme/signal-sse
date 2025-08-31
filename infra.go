@@ -1,53 +1,15 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql" // Import the MySQL driver
 	"github.com/google/uuid"
-	"github.com/nats-io/nats.go"
 )
-
-// designed to store details from both incoming and outgoing Signal messages.
-type HistoryRecord struct {
-	ID                string    // Unique ID for this history record
-	EventType         string    // "inbound" or "outbound"
-	Account           string    // Signal account involved
-	SenderNumber      string    // Sender's phone number (for inbound)
-	SenderName        string    // Sender's name (for inbound)
-	Recipient         string    // Recipient's phone number (for outbound)
-	MessageContent    string    // The actual text message content
-	AttachmentsExist  bool      // True if attachments were present
-	TimestampService  int64     // When our service processed/logged it (Unix Millis)
-	TimestampSignal   int64     // Original timestamp from Signal (Unix Millis)
-	RawPayload        string    // Raw JSON payload of the original message
-	ProcessedByServer string    // The server that processed this message
-	LoggedAt          time.Time // When this record was inserted into history (UTC)
-}
-
-// AttachmentRecord represents a single entry in the tb_attachments table.
-type HistoryAttachmentRecord struct {
-	ID              string    // Unique ID for this attachment record
-	HistoryID       string    // Foreign key to tb_history
-	ContentType     string    // e.g., "image/jpeg"
-	Filename        string    // Original filename
-	Size            int       // Size in bytes
-	Width           int       // Image width (if applicable)
-	Height          int       // Image height (if applicable)
-	Caption         string    // Caption for the attachment
-	UploadTimestamp int       // Original upload timestamp from Signal
-	LoggedAt        time.Time // When this record was inserted into history (UTC)
-}
-
-// HistoryDB provides database operations for tb_history and tb_attachments.
-type HistoryDB struct {
-	db *sql.DB
-}
 
 // ConnectHistoryDB initializes and returns a new HistoryDB instance for MySQL.
 // It takes the MySQL DSN (Data Source Name) as input.
@@ -170,7 +132,7 @@ func (h *HistoryDB) insertOutboundMessage(payload *SignalOutboundMessage, servic
 		return fmt.Errorf("failed to marshal outbound payload to JSON: %w", err)
 	}
 
-	historyID := uuid.NewString()
+	historyID := uuid.NewString() + "-" + strconv.FormatInt(serviceTimestamp, 10)
 
 	var attachmentsExist bool
 	if payload.Attachment != "" {
@@ -287,88 +249,4 @@ func (h *HistoryDB) insertHistoryAttachmentRecord(tx *sql.Tx, record HistoryAtta
 		return fmt.Errorf("failed to insert attachment record into tb_attachments: %w", err)
 	}
 	return nil
-}
-
-// startHistoryNatsSubscribers configures and starts NATS subscribers dedicated to logging messages to history.
-func startHistoryNatsSubscribers(ctx context.Context, nc *nats.Conn, cfg *Config, historyDB *HistoryDB) {
-	log.Println("Starting NATS history subscribers...")
-
-	// Subscriber for inbound messages
-	// Subscribes to the standard NATS topic where `receiveSignalMessageService` (in another service) publishes.
-	// Using Subscribe for scalability among multiple history logger instances.
-	inboundSub, err := nc.Subscribe(cfg.NatsSubjectIn, func(msg *nats.Msg) {
-
-		log.Printf("Received INBOUND NATS message for history on topic '%s'.", msg.Subject)
-		var inboundPayload InboundNatsMessagePayload
-		if err := json.Unmarshal(msg.Data, &inboundPayload); err != nil {
-			log.Printf("Error decoding INBOUND NATS payload for history: %v", err)
-			return
-		}
-
-		if inboundPayload.Server == getHostname() {
-			if err := historyDB.insertInboundMessage(&inboundPayload, getHostname()); err != nil {
-				log.Printf("Error logging INBOUND message to history: %v", err)
-			}
-		}
-
-	})
-	if err != nil {
-		log.Fatalf("Failed to subscribe to topic '%s' for inbound history: %v", cfg.NatsSubjectIn, err)
-	}
-	log.Printf("Successfully subscribed to topic '%s' (group 'history-inbound-group') for inbound history logging.", cfg.NatsSubjectIn)
-
-	// Subscriber for outbound messages
-	// Subscribes to the standard NATS topic where outbound messages are published (e.g., before going to Signal CLI API).
-	// Using Subscribe for scalability among multiple history logger instances.
-	outboundSub, err := nc.Subscribe(cfg.NatsSubjectOut, func(msg *nats.Msg) {
-		log.Printf("Received OUTBOUND NATS message for history on topic '%s'.", msg.Subject)
-		var outboundMessage SignalOutboundMessage
-		if err := json.Unmarshal(msg.Data, &outboundMessage); err != nil {
-			log.Printf("Error decoding OUTBOUND NATS payload for history: %v", err)
-			return
-		}
-
-		// The service timestamp for the outbound message is generated here, at the time of logging.
-		serviceTimestamp := time.Now().UnixMilli()
-		if err := historyDB.insertOutboundMessage(&outboundMessage, serviceTimestamp, getHostname()); err != nil {
-			log.Printf("Error logging OUTBOUND message to history: %v", err)
-		}
-	})
-	if err != nil {
-		log.Fatalf("Failed to subscribe to topic '%s' for outbound history: %v", cfg.NatsSubjectOut, err)
-	}
-	log.Printf("Successfully subscribed to topic '%s' (group 'history-outbound-group') for outbound history logging.", cfg.NatsSubjectOut)
-
-	<-ctx.Done() // Wait for the context to be cancelled to shut down subscribers
-	log.Println("Context cancelled, shutting down history subscribers.")
-
-	if err := inboundSub.Unsubscribe(); err != nil {
-		log.Printf("Error unsubscribing from INBOUND topic: %v", err)
-	}
-	if err := outboundSub.Unsubscribe(); err != nil {
-		log.Printf("Error unsubscribing from OUTBOUND topic: %v", err)
-	}
-}
-
-// Entry point
-func startStorage(ctx context.Context, nc *nats.Conn, cfg *Config) {
-
-	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-
-	log.Printf("Attempting to connect to MySQL database...")
-
-	historyDB, err := ConnectHistoryDB(cfg.MySQLDSN)
-	if err != nil {
-		log.Fatalf("Could not connect to history database: %v", err)
-	}
-	defer func() {
-		if closeErr := historyDB.Close(); closeErr != nil {
-			log.Printf("Error closing history database: %v", closeErr)
-		}
-	}()
-
-	// Start only the history subscribers. This function will block until ctx is cancelled.
-	startHistoryNatsSubscribers(ctx, nc, cfg, historyDB)
-
-	log.Println("NATS history service shut down. Exiting application.")
 }

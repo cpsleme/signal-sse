@@ -117,7 +117,7 @@ server-sse:
 		MySQLDSN:       mysqlDSN,
 		NatsServer:     natsServer,
 		NatsSubjectIn:  "signal.inbound." + getHostname(),
-		NatsSubjectOut: "signal.outbound",
+		NatsSubjectOut: "signal.outbound." + getHostname(),
 		NatsQueueGroup: "signal.outbound.group",
 	}, nil
 }
