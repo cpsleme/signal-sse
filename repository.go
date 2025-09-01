@@ -11,6 +11,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// HistoryDB provides database operations for tb_history and tb_attachments.
+type HistoryDB struct {
+	db *sql.DB
+}
+
 // ConnectHistoryDB initializes and returns a new HistoryDB instance for MySQL.
 // It takes the MySQL DSN (Data Source Name) as input.
 func ConnectHistoryDB(mysqlDSN string) (*HistoryDB, error) {

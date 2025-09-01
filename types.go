@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"time"
 )
 
@@ -128,9 +127,4 @@ type HistoryAttachmentRecord struct {
 	Caption         string    // Caption for the attachment
 	UploadTimestamp int       // Original upload timestamp from Signal
 	LoggedAt        time.Time // When this record was inserted into history (UTC)
-}
-
-// HistoryDB provides database operations for tb_history and tb_attachments.
-type HistoryDB struct {
-	db *sql.DB
 }
