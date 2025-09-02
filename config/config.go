@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	util "signal-sse/utils"
+	"signal-sse/util"
 
 	"path/filepath"
 
