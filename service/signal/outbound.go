@@ -1,4 +1,4 @@
-package main
+package signal_service
 
 import (
 	"bytes"
@@ -7,20 +7,22 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"signal-sse/config"
+	"signal-sse/domain"
 	"time"
 
 	"github.com/nats-io/nats.go"
 )
 
 // sendSignalMessage is responsible for sending a message to signal-cli's HTTP API.
-func sendSignalMessage(cfg *Config, data []byte) error {
-	var natsMessage SignalOutboundMessage
+func sendSignalMessage(cfg *config.Config, data []byte) error {
+	var natsMessage domain.SignalOutboundMessage
 	if err := json.Unmarshal(data, &natsMessage); err != nil {
 		log.Printf("Error decoding JSON message from NATS: %v", err)
 		return fmt.Errorf("decoding NATS message: %w", err)
 	}
 
-	signalRequest := SignalRPCRequest{
+	signalRequest := domain.SignalRPCRequest{
 		JSONRPC: "2.0",
 		Method:  "send",
 		Params:  natsMessage,
@@ -61,8 +63,8 @@ func sendSignalMessage(cfg *Config, data []byte) error {
 	return nil
 }
 
-// sendSignalMessageService subscribes to a NATS topic and processes messages using a queue group.
-func sendSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config) {
+// SendSignalMessageService subscribes to a NATS topic and processes messages using a queue group.
+func SendSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *config.Config) {
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 

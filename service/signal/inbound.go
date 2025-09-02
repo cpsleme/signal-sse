@@ -1,4 +1,4 @@
-package main
+package signal_service
 
 import (
 	"bufio"
@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"signal-sse/config"
+	"signal-sse/domain"
+	"signal-sse/util"
 	"strings"
 	"time"
 
@@ -16,7 +19,7 @@ import (
 
 // receiveSignalMessageService is a long-running goroutine that connects to the signal-cli's
 // SSE stream and publishes received messages to a NATS topic.
-func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config) {
+func ReceiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *config.Config) {
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
@@ -51,7 +54,7 @@ func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config
 			continue
 		}
 
-		var eventData EventDataIn
+		var eventData domain.EventDataIn
 		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data:")), &eventData); err != nil {
 			log.Printf("Error decoding event data: %v", err)
 			continue
@@ -59,9 +62,9 @@ func receiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *Config
 
 		idMessage := fmt.Sprintf("%s-%v", eventData.Envelope.SourceUUID, eventData.Envelope.Timestamp)
 
-		inboundPayload := InboundNatsMessagePayload{
+		inboundPayload := domain.InboundNatsMessagePayload{
 			ID:              idMessage,
-			Server:          getHostname(),
+			Server:          util.GetHostname(),
 			TimestampServer: time.Now().UnixMilli(),
 			EventData:       &eventData,
 		}

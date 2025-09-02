@@ -1,7 +1,6 @@
-package main
+package util
 
 import (
-	"log"
 	"os"
 )
 
@@ -11,7 +10,7 @@ import (
 
 // getEnvAsString returns the value of an environment variable as a string,
 // or a default value if the variable is not set.
-func getEnvAsString(key, defaultValue string) string {
+func GetEnvAsString(key, defaultValue string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		return defaultValue
@@ -19,18 +18,8 @@ func getEnvAsString(key, defaultValue string) string {
 	return value
 }
 
-// getHostname returns the local hostname or a default string if an error occurs.
-func getHostname() string {
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Printf("Error getting hostname: %v", err)
-		return "unknown-host"
-	}
-	return hostname
-}
-
 // valueOrDefault helps handle *string pointers safely.
-func valueOrDefault(s *string) string {
+func ValueOrDefault(s *string) string {
 	if s != nil {
 		return *s
 	}

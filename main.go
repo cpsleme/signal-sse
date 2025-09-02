@@ -5,6 +5,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"signal-sse/config"
+	signal_service "signal-sse/service/signal"
+	storage_service "signal-sse/service/storage"
 	"syscall"
 
 	"github.com/nats-io/nats.go"
@@ -16,7 +19,7 @@ import (
 
 func main() {
 	// Initialize configuration
-	cfg, err := initConfig()
+	cfg, err := config.Configuration()
 	if err != nil {
 		log.Fatalf("Could not get configuraion. %v", err)
 	}
@@ -41,12 +44,13 @@ func main() {
 	defer nc.Close()
 	log.Printf("Successfully connected to NATS at: %s", cfg.NatsServer)
 
-	// Start services as Goroutines, passing context and config
-	go receiveSignalMessageService(ctx, nc, cfg)
-	go sendSignalMessageService(ctx, nc, cfg)
+	// Start Signal Services as Goroutines, passing context and config
+	go signal_service.ReceiveSignalMessageService(ctx, nc, cfg)
+	go signal_service.SendSignalMessageService(ctx, nc, cfg)
 
-	go startHistoryNatsSubInbound(ctx, nc, cfg)
-	go startHistoryNatsSubOutbound(ctx, nc, cfg)
+	// Start Storage Services as Goroutines, passing context and config
+	go storage_service.StartHistoryInbound(ctx, nc, cfg)
+	go storage_service.StartHistoryOutbound(ctx, nc, cfg)
 
 	<-ctx.Done() // Wait for the context to be cancelled
 	log.Println("All services stopped. Exiting application.")

@@ -1,18 +1,23 @@
-package main
+package storage_service
 
 import (
 	"context"
 	"encoding/json"
 	"log"
+	"signal-sse/config"
+	"signal-sse/domain"
+	"signal-sse/infra"
+	"signal-sse/repository"
+	"signal-sse/util"
 
 	_ "github.com/go-sql-driver/mysql" // Import the MySQL driver
 	"github.com/nats-io/nats.go"
 )
 
-// startHistoryNatsSubscribers configures and starts NATS subscribers dedicated to logging messages to history.
-func startHistoryNatsSubInbound(ctx context.Context, nc *nats.Conn, cfg *Config) {
+// StartHistoryInbound configures and starts NATS subscribers dedicated to logging messages to history.
+func StartHistoryInbound(ctx context.Context, nc *nats.Conn, cfg *config.Config) {
 
-	historyDB, err := ConnectHistoryDB(cfg.MySQLDSN)
+	historyDB, err := infra.ConnectHistoryDB(cfg.MySQLDSN)
 	if err != nil {
 		log.Fatalf("Could not connect to history database: %v", err)
 	}
@@ -28,14 +33,14 @@ func startHistoryNatsSubInbound(ctx context.Context, nc *nats.Conn, cfg *Config)
 	inboundSub, err := nc.Subscribe(cfg.NatsSubjectIn, func(msg *nats.Msg) {
 
 		log.Printf("Received INBOUND NATS message for history on topic '%s'.", msg.Subject)
-		var inboundPayload InboundNatsMessagePayload
+		var inboundPayload domain.InboundNatsMessagePayload
 		if err := json.Unmarshal(msg.Data, &inboundPayload); err != nil {
 			log.Printf("Error decoding INBOUND NATS payload for history: %v", err)
 			return
 		}
 
-		if inboundPayload.Server == getHostname() {
-			if err := historyDB.insertInboundMessage(&inboundPayload, getHostname()); err != nil {
+		if inboundPayload.Server == util.GetHostname() {
+			if err := repository.InsertInboundMessage(historyDB, &inboundPayload, util.GetHostname()); err != nil {
 				log.Printf("Error logging INBOUND message to history: %v", err)
 			}
 		}

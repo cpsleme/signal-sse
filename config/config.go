@@ -1,9 +1,10 @@
-package main
+package config
 
 import (
 	"fmt"
 	"log"
 	"os"
+	util "signal-sse/utils"
 
 	"path/filepath"
 
@@ -43,8 +44,8 @@ type Config struct {
 	NatsQueueGroup string
 }
 
-// initConfig reads the configuration file and loads it into the struct.
-func initConfig() (*Config, error) {
+// Configuration reads the configuration file and loads it into the struct.
+func Configuration() (*Config, error) {
 
 	configDirPath := "/etc/signal-sse"
 
@@ -116,8 +117,8 @@ server-sse:
 		SSEURLSend:     sseURLSend,
 		MySQLDSN:       mysqlDSN,
 		NatsServer:     natsServer,
-		NatsSubjectIn:  "signal.inbound." + getHostname(),
-		NatsSubjectOut: "signal.outbound." + getHostname(),
+		NatsSubjectIn:  "signal.inbound." + util.GetHostname(),
+		NatsSubjectOut: "signal.outbound." + util.GetHostname(),
 		NatsQueueGroup: "signal.outbound.group",
 	}, nil
 }

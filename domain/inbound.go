@@ -1,0 +1,62 @@
+package domain
+
+//----------------------------------------------------------------------------------------------------
+// Structs for Incoming Payloads (Signal CLI SSE -> NATS)
+//----------------------------------------------------------------------------------------------------
+
+// Attachment represents the structure for message attachments from Signal.
+type Attachment struct {
+	ContentType     string  `json:"contentType"`
+	Filename        *string `json:"filename"`
+	ID              string  `json:"id"`
+	Size            int     `json:"size"`
+	Width           int     `json:"width"`
+	Height          int     `json:"height"`
+	Caption         *string `json:"caption"`
+	UploadTimestamp int     `json:"uploadTimestamp"`
+}
+
+// SentMessageIn represents the sent message structure within a SyncMessage.
+type SentMessageIn struct {
+	Destination       string        `json:"destination"`
+	DestinationNumber string        `json:"destinationNumber"`
+	DestinationUUID   string        `json:"destinationUuid"`
+	Timestamp         int64         `json:"timestamp"`
+	Message           *string       `json:"message"`
+	ExpiresInSeconds  int           `json:"expiresInSeconds"`
+	ViewOnce          bool          `json:"viewOnce"`
+	Attachments       *[]Attachment `json:"attachments"`
+}
+
+// SyncMessageIn represents the sync message structure received from Signal.
+type SyncMessageIn struct {
+	SentMessage *SentMessageIn `json:"sentMessage"`
+}
+
+// EnvelopeIn represents the core message envelope containing sender and message details.
+type EnvelopeIn struct {
+	Source                   string        `json:"source"`
+	SourceNumber             string        `json:"sourceNumber"`
+	SourceUUID               string        `json:"sourceUuid"`
+	SourceName               string        `json:"sourceName"`
+	SourceDevice             int           `json:"sourceDevice"`
+	Timestamp                int64         `json:"timestamp"`
+	ServerReceivedTimestamp  int64         `json:"serverReceivedTimestamp"`
+	ServerDeliveredTimestamp int64         `json:"serverDeliveredTimestamp"`
+	SyncMessage              SyncMessageIn `json:"syncMessage"`
+}
+
+// EventDataIn represents the top-level event data received from the Signal SSE stream.
+type EventDataIn struct {
+	Envelope EnvelopeIn `json:"envelope"`
+	Account  string     `json:"account"`
+}
+
+// InboundNatsMessagePayload represents the payload structure for messages published to the NATS 'inbound' topic.
+// It wraps the raw Signal event data with a unique ID and server-side timestamp.
+type InboundNatsMessagePayload struct {
+	ID              string       `json:"id"`
+	Server          string       `json:"server"`
+	TimestampServer int64        `json:"timestamp"`
+	EventData       *EventDataIn `json:"eventData"`
+}

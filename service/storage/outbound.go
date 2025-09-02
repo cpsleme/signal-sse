@@ -1,19 +1,24 @@
-package main
+package storage_service
 
 import (
 	"context"
 	"encoding/json"
 	"log"
+	"signal-sse/config"
+	"signal-sse/domain"
+	"signal-sse/infra"
+	"signal-sse/repository"
+	"signal-sse/util"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql" // Import the MySQL driver
 	"github.com/nats-io/nats.go"
 )
 
-// startHistoryNatsSubscribers configures and starts NATS subscribers dedicated to logging messages to history.
-func startHistoryNatsSubOutbound(ctx context.Context, nc *nats.Conn, cfg *Config) {
+// StartHistoryOutbound configures and starts NATS subscribers dedicated to logging messages to history.
+func StartHistoryOutbound(ctx context.Context, nc *nats.Conn, cfg *config.Config) {
 
-	historyDB, err := ConnectHistoryDB(cfg.MySQLDSN)
+	historyDB, err := infra.ConnectHistoryDB(cfg.MySQLDSN)
 	if err != nil {
 		log.Fatalf("Could not connect to history database: %v", err)
 	}
@@ -28,7 +33,7 @@ func startHistoryNatsSubOutbound(ctx context.Context, nc *nats.Conn, cfg *Config
 	// Using Subscribe for scalability among multiple history logger instances.
 	outboundSub, err := nc.Subscribe(cfg.NatsSubjectOut, func(msg *nats.Msg) {
 		log.Printf("Received OUTBOUND NATS message for history on topic '%s'.", msg.Subject)
-		var outboundMessage SignalOutboundMessage
+		var outboundMessage domain.SignalOutboundMessage
 		if err := json.Unmarshal(msg.Data, &outboundMessage); err != nil {
 			log.Printf("Error decoding OUTBOUND NATS payload for history: %v", err)
 			return
@@ -36,7 +41,7 @@ func startHistoryNatsSubOutbound(ctx context.Context, nc *nats.Conn, cfg *Config
 
 		// The service timestamp for the outbound message is generated here, at the time of logging.
 		serviceTimestamp := time.Now().UnixMilli()
-		if err := historyDB.insertOutboundMessage(&outboundMessage, serviceTimestamp, getHostname()); err != nil {
+		if err := repository.InsertOutboundMessage(historyDB, &outboundMessage, serviceTimestamp, util.GetHostname()); err != nil {
 			log.Printf("Error logging OUTBOUND message to history: %v", err)
 		}
 	})
