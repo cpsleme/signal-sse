@@ -10,7 +10,7 @@ import (
 
 	"signal-sse/domain"
 	"signal-sse/infra"
-	util "signal-sse/utils"
+	"signal-sse/util"
 
 	"github.com/google/uuid"
 )
