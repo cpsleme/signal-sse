@@ -6,11 +6,10 @@ import (
 	"os"
 	"os/signal"
 	"signal-sse/config"
+	"signal-sse/infra"
 	signal_service "signal-sse/service/signal"
 	storage_service "signal-sse/service/storage"
 	"syscall"
-
-	"github.com/nats-io/nats.go"
 )
 
 //----------------------------------------------------------------------------------------------------
@@ -35,17 +34,11 @@ func main() {
 		cancel() // Signal all Goroutines to stop
 	}()
 
-	// Centralized NATS connection
-	log.Printf("Attempting to connect to NATS at: %s", cfg.NatsServer)
-	nc, err := nats.Connect(cfg.NatsServer)
-	if err != nil {
-		log.Fatalf("Could not connect to NATS. %v", err)
-	}
+	nc, kv := infra.ConnectToNATS(ctx, cfg) // Centralized NATS connection
 	defer nc.Close()
-	log.Printf("Successfully connected to NATS at: %s", cfg.NatsServer)
 
 	// Start Signal Services as Goroutines, passing context and config
-	go signal_service.ReceiveSignalMessageService(ctx, nc, cfg)
+	go signal_service.ReceiveSignalMessageService(ctx, nc, kv, cfg)
 	go signal_service.SendSignalMessageService(ctx, nc, cfg)
 
 	// Start Storage Services as Goroutines, passing context and config

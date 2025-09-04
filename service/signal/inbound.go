@@ -19,7 +19,7 @@ import (
 
 // receiveSignalMessageService is a long-running goroutine that connects to the signal-cli's
 // SSE stream and publishes received messages to a NATS topic.
-func ReceiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *config.Config) {
+func ReceiveSignalMessageService(ctx context.Context, nc *nats.Conn, kv jetstream.KeyValue, cfg *config.Config) {
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
@@ -39,13 +39,6 @@ func ReceiveSignalMessageService(ctx context.Context, nc *nats.Conn, cfg *config
 	defer resp.Body.Close()
 
 	log.Println("Connected to SSE stream.")
-
-	js, err := jetstream.New(nc)
-	if err != nil {
-		log.Fatalf("Could not create JetStream context. %v", err)
-	}
-
-	kv, _ := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "signal_history_bkt"})
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
