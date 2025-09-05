@@ -11,7 +11,9 @@ import (
 
 // Centralized NATS connection
 func ConnectToNATS(ctx context.Context, cfg *config.Config) (nc *nats.Conn, kv jetstream.KeyValue) {
+
 	log.Printf("Attempting to connect to NATS at: %s", cfg.NatsServer)
+
 	nc, err := nats.Connect(cfg.NatsServer)
 	if err != nil {
 		log.Fatalf("Could not connect to NATS. %v", err)

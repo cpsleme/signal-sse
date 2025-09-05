@@ -1,14 +1,13 @@
 package signal_service
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"signal-sse/config"
 	"signal-sse/domain"
+	"signal-sse/infra"
 	"signal-sse/util"
 	"strings"
 	"time"
@@ -17,30 +16,11 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// receiveSignalMessageService is a long-running goroutine that connects to the signal-cli's
+// ReceiveSignalMessageService is a long-running goroutine that connects to the signal-cli's
 // SSE stream and publishes received messages to a NATS topic.
 func ReceiveSignalMessageService(ctx context.Context, nc *nats.Conn, kv jetstream.KeyValue, cfg *config.Config) {
 
-	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-
-	log.Printf("Starting Signal SSE receiver on %s...", cfg.NatsSubjectIn)
-
-	client := &http.Client{}
-	req, err := http.NewRequestWithContext(ctx, "GET", cfg.SSEURLReceive, nil)
-	if err != nil {
-		log.Fatalf("Failed to create SSE request: %v", err)
-	}
-	req.Header.Set("Accept", "text/event-stream")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to connect to SSE endpoint: %v", err)
-	}
-	defer resp.Body.Close()
-
-	log.Println("Connected to SSE stream.")
-
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := infra.ConnectToSSE(ctx, cfg)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -87,5 +67,7 @@ func ReceiveSignalMessageService(ctx context.Context, nc *nats.Conn, kv jetstrea
 	if err := scanner.Err(); err != nil {
 		log.Printf("SSE stream error: %v", err)
 	}
+
 	log.Println("SSE receiver shut down.")
+
 }
